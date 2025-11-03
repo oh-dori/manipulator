@@ -1,0 +1,7 @@
+<library path="arduino_hardware_interface">
+  <class name="arduino_hardware_interface/ArduinoHardwareInterface"
+         type="arduino_hardware_interface::ArduinoHardwareInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>ros2_control hardware interface for an Arduino-based manipulator.</description>
+  </class>
+</library>

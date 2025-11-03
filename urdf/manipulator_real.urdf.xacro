@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="manipulator">
+
+  <!-- 1. 공통 로봇 모델 포함 -->
+  <xacro:include filename="$(find manipulator)/urdf/manipulator.xacro" />
+
+  <!--
+  ===================================================================
+  |                   ROS2 CONTROL FOR REAL ROBOT                   |
+  ===================================================================
+  -->
+  <ros2_control name="RealRobot" type="system">
+    <hardware>
+      <!-- 나중에 만들 실제 로봇용 하드웨어 인터페이스 플러그인 -->
+      <plugin>arduino_hardware_interface/ArduinoHardwareInterface</plugin>
+      <param name="serial_port">/dev/ttyUSB0</param>
+      <param name="baud_rate">9600</param>
+    </hardware>
+    <xacro:ros2_control_joint joint_name="joint_1" min_pos="${-pi/2}" max_pos="${pi/2}"/>
+    <xacro:ros2_control_joint joint_name="joint_2" min_pos="0"        max_pos="${pi}"/>
+    <xacro:ros2_control_joint joint_name="joint_3" min_pos="${-pi}"    max_pos="0"/>
+    <xacro:ros2_control_joint joint_name="joint_4" min_pos="${-pi/2}" max_pos="${pi/2}"/>
+    <xacro:ros2_control_joint joint_name="joint_5_left" min_pos="0" max_pos="0.008"/>
+  </ros2_control>
+
+</robot>

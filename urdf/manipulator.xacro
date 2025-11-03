@@ -1,0 +1,128 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="manipulator">
+
+  <!--
+  ===================================================================
+  |                           PROPERTIES                            |
+  |      자주 사용되는 상수들을 변수로 정의하여 관리 용이성을 높입니다.      |
+  ===================================================================
+  -->
+  <xacro:property name="mesh_scale" value="0.001 0.001 0.001" />
+  <xacro:property name="default_inertia" value="1e-6" />
+
+  <!--
+  ===================================================================
+  |                        MATERIAL DEFINITIONS                     |
+  |                   RViz와 Gazebo에서 사용할 색상을 정의합니다.                 |
+  ===================================================================
+  -->
+  <material name="white"><color rgba="1 1 1 1"/></material>
+  <material name="blue"><color rgba="0.2 0.2 1 1"/></material>
+  <material name="grey"><color rgba="0.5 0.5 0.5 1"/></material>
+
+  <!--
+  ===================================================================
+  |                              MACROS                             |
+  |       반복되는 링크, 조인트, ros2_control 설정을 매크로로 만듭니다.       |
+  ===================================================================
+  -->
+
+  <!-- 링크 생성을 위한 매크로 -->
+  <xacro:macro name="create_link" params="link_name mass origin_xyz gazebo_material">
+    <link name="${link_name}">
+      <visual>
+        <geometry>
+          <mesh filename="package://manipulator/meshes/${link_name}.stl" scale="${mesh_scale}"/>
+        </geometry>
+        <material name="${gazebo_material}"/>
+      </visual>
+      <collision>
+        <geometry>
+          <mesh filename="package://manipulator/meshes/${link_name}.stl" scale="${mesh_scale}"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="${mass}"/>
+        <origin xyz="${origin_xyz}" rpy="0 0 0"/>
+        <inertia ixx="${default_inertia}" ixy="0.0" ixz="0.0" iyy="${default_inertia}" iyz="0.0" izz="${default_inertia}"/>
+      </inertial>
+    </link>
+    <!-- Gazebo에서 사용할 색상 -->
+    <gazebo reference="${link_name}">
+      <material>Gazebo/${gazebo_material}</material>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- 회전 조인트 생성을 위한 매크로 -->
+  <xacro:macro name="create_revolute_joint" params="joint_name parent child origin_xyz axis_xyz lower_limit upper_limit">
+    <joint name="${joint_name}" type="revolute">
+      <parent link="${parent}"/>
+      <child link="${child}"/>
+      <origin xyz="${origin_xyz}" rpy="0 0 0"/>
+      <axis xyz="${axis_xyz}"/>
+      <limit lower="${lower_limit}" upper="${upper_limit}" effort="100" velocity="1"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- ros2_control 조인트 인터페이스를 위한 매크로 -->
+  <xacro:macro name="ros2_control_joint" params="joint_name min_pos max_pos">
+    <joint name="${joint_name}">
+      <command_interface name="position">
+        <param name="min">${min_pos}</param>
+        <param name="max">${max_pos}</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+
+
+  <!--
+  ===================================================================
+  |                         ROBOT DEFINITION                        |
+  |             위에서 정의한 매크로를 사용하여 로봇을 조립합니다.             |
+  ===================================================================
+  -->
+
+  <!-- World Link와 Base Link를 연결하는 고정 조인트 -->
+  <link name="world" />
+  <joint name="world_joint" type="fixed">
+    <parent link="world"/>
+    <child link="link_1"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 매크로를 사용하여 링크 생성 -->
+  <xacro:create_link link_name="link_1" mass="0.01" origin_xyz="0.04 0.00 0.00" gazebo_material="Grey"/>
+  <xacro:create_link link_name="link_2" mass="0.06" origin_xyz="0.00 0.00 0.01" gazebo_material="Blue"/>
+  <xacro:create_link link_name="link_3" mass="0.08" origin_xyz="-0.04 0.00 0.00" gazebo_material="Grey"/>
+  <xacro:create_link link_name="link_4" mass="0.07" origin_xyz="0.02 0.00 0.03" gazebo_material="Blue"/>
+  <xacro:create_link link_name="link_5" mass="0.03" origin_xyz="0.00 0.00 0.00" gazebo_material="Grey"/>
+  <xacro:create_link link_name="link_6" mass="0.01" origin_xyz="0.01 0.01 0.00" gazebo_material="White"/>
+  <xacro:create_link link_name="link_7" mass="0.01" origin_xyz="0.01 -0.01 0.00" gazebo_material="White"/>
+
+  <!-- 매크로를 사용하여 회전 조인트 생성 -->
+  <xacro:create_revolute_joint joint_name="joint_1" parent="link_1" child="link_2" origin_xyz="0 0 0.043"    axis_xyz="0 0 1" lower_limit="${-pi/2}" upper_limit="${pi/2}"/>
+  <xacro:create_revolute_joint joint_name="joint_2" parent="link_2" child="link_3" origin_xyz="0 0 0.0325"   axis_xyz="0 1 0" lower_limit="0"        upper_limit="${pi}"/>
+  <xacro:create_revolute_joint joint_name="joint_3" parent="link_3" child="link_4" origin_xyz="-0.09 0 0"    axis_xyz="0 1 0" lower_limit="${-pi}"    upper_limit="0"/>
+  <xacro:create_revolute_joint joint_name="joint_4" parent="link_4" child="link_5" origin_xyz="0.0827 0 0.0355" axis_xyz="0 1 0" lower_limit="${-pi/2}" upper_limit="${pi/2}"/>
+
+  <!-- 그리퍼 조인트 (Prismatic & Mimic) -->
+  <joint name="joint_5_left" type="prismatic">
+    <parent link="link_5"/>
+    <child link="link_6"/>
+    <origin xyz="0.019 0.00 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="0.008" effort="100" velocity="1"/>
+  </joint>
+
+  <joint name="joint_5_right" type="prismatic">
+    <parent link="link_5"/>
+    <child link="link_7"/>
+    <origin xyz="0.019 0.00 0" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="0" upper="0.008" effort="100" velocity="1"/>
+    <mimic joint="joint_5_left" multiplier="1" offset="0"/>
+  </joint>
+
+</robot>

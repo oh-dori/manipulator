@@ -1,11 +1,10 @@
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, AppendEnvironmentVariable
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.event_handlers import OnProcessExit
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     # Declare arguments
@@ -13,7 +12,7 @@ def generate_launch_description():
     declared_arguments.append(
         DeclareLaunchArgument(
             "use_sim_time",
-            default_value="true",
+            default_value="false", # 실제 로봇은 시뮬레이션 시간을 사용하지 않습니다.
             description="Use simulation (Gazebo) clock if true",
         )
     )
@@ -21,21 +20,12 @@ def generate_launch_description():
     # Initialize Arguments
     use_sim_time = LaunchConfiguration("use_sim_time")
 
-    # Get the package paths
+    # Get the package path
     pkg_manipulator_path = FindPackageShare('manipulator')
-    pkg_gazebo_ros_path = FindPackageShare('gazebo_ros')
 
-    # --- FIX: Gazebo가 모델 파일을 찾을 수 있도록 경로를 환경 변수에 추가 ---
-    # manipulator 패키지의 share 디렉토리 경로를 올바르게 설정합니다.
-    manipulator_share_path = get_package_share_directory('manipulator')
-    gazebo_model_path = AppendEnvironmentVariable(
-        'GAZEBO_MODEL_PATH',
-        os.path.join(os.path.dirname(manipulator_share_path), '') # Get parent directory of package's share
-    )
-
-    # XACRO 파일 경로 설정
+    # 실제 로봇용 URDF 파일 경로 설정
     xacro_file = PathJoinSubstitution(
-        [pkg_manipulator_path, "urdf", "manipulator_sim.urdf.xacro"]
+        [pkg_manipulator_path, "urdf", "manipulator_real.urdf.xacro"]
     )
     
     # xacro 명령어를 사용하여 URDF 생성
@@ -48,24 +38,16 @@ def generate_launch_description():
     )
     robot_description = {"robot_description": robot_description_content}
 
-    # Gazebo launch
-    gazebo = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution(
-                [pkg_gazebo_ros_path, 'launch', 'gazebo.launch.py']
-            )
-        )
+    # ros2_control 노드: 하드웨어 인터페이스와 컨트롤러 매니저를 로드합니다.
+    ros2_control_node = Node(
+        package="controller_manager",
+        executable="ros2_control_node",
+        parameters=[robot_description, 
+                    PathJoinSubstitution([pkg_manipulator_path, "config", "my_controllers.yaml"])],
+        output="screen",
     )
 
-    # Spawn robot
-    spawn_entity = Node(
-        package='gazebo_ros',
-        executable='spawn_entity.py',
-        arguments=['-topic', 'robot_description', '-entity', 'manipulator'],
-        output='screen'
-    )
-
-    # Robot state publisher
+    # Robot state publisher: TF 정보를 발행합니다.
     robot_state_publisher_node = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
@@ -73,14 +55,14 @@ def generate_launch_description():
         parameters=[robot_description, {"use_sim_time": use_sim_time}],
     )
 
-    # Joint state broadcaster spawner
+    # Joint state broadcaster spawner: 컨트롤러 매니저가 활성화된 후 실행됩니다.
     joint_state_broadcaster_spawner = Node(
         package="controller_manager",
         executable="spawner",
         arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
     )
 
-    # Joint trajectory controller spawner
+    # Joint trajectory controller spawner: 컨트롤러 매니저가 활성화된 후 실행됩니다.
     joint_trajectory_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
@@ -88,9 +70,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription(declared_arguments + [
-        gazebo_model_path, # 추가된 환경 변수 설정을 리스트 맨 앞에 포함
-        gazebo,
-        spawn_entity,
+        ros2_control_node,
         robot_state_publisher_node,
         joint_state_broadcaster_spawner,
         joint_trajectory_controller_spawner,

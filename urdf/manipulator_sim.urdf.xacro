@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="manipulator">
+
+  <!-- 1. 공통 로봇 모델 포함 -->
+  <xacro:include filename="$(find manipulator)/urdf/manipulator.xacro" />
+
+  <!--
+  ===================================================================
+  |                 ROS2 CONTROL FOR GAZEBO SIMULATION              |
+  ===================================================================
+  -->
+  <ros2_control name="GazeboSystem" type="system">
+    <hardware>
+      <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+    </hardware>
+    <!-- 매크로를 사용하여 제어할 조인트 정의 -->
+    <xacro:ros2_control_joint joint_name="joint_1" min_pos="${-pi/2}" max_pos="${pi/2}"/>
+    <xacro:ros2_control_joint joint_name="joint_2" min_pos="0"        max_pos="${pi}"/>
+    <xacro:ros2_control_joint joint_name="joint_3" min_pos="${-pi}"    max_pos="0"/>
+    <xacro:ros2_control_joint joint_name="joint_4" min_pos="${-pi/2}" max_pos="${pi/2}"/>
+    <xacro:ros2_control_joint joint_name="joint_5_left" min_pos="0" max_pos="0.008"/>
+    <xacro:ros2_control_joint joint_name="joint_5_right" min_pos="0" max_pos="0.008"/>
+  </ros2_control>
+
+  <!--
+  ===================================================================
+  |                     GAZEBO ROS2 CONTROL PLUGIN                    |
+  ===================================================================
+  -->
+  <gazebo>
+    <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
+      <parameters>$(find manipulator)/config/my_controllers.yaml</parameters>
+    </plugin>
+  </gazebo>
+
+</robot>
