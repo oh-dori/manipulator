@@ -1,4 +1,4 @@
-# ROS 2 매니퓰레이터 학습 가이드
+# ROS 2 매니퓰레이터 학습 노트
 
 이 문서는 `manipulator` 패키지를 따라가며 URDF, TF, ros2_control, Gazebo, 하드웨어 인터페이스가 어떻게 연결되는지 설명한다.
 
