@@ -1,10 +1,9 @@
-import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
-from launch.event_handlers import OnProcessExit
+from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
 
 def generate_launch_description():
     # Declare arguments
@@ -16,9 +15,33 @@ def generate_launch_description():
             description="Use simulation (Gazebo) clock if true",
         )
     )
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "serial_port",
+            default_value="/dev/ttyUSB0",
+            description="Arduino serial device",
+        )
+    )
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "baud_rate",
+            default_value="115200",
+            description="Arduino serial baud rate",
+        )
+    )
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "write_rate_hz",
+            default_value="20",
+            description="Maximum serial command rate",
+        )
+    )
 
     # Initialize Arguments
     use_sim_time = LaunchConfiguration("use_sim_time")
+    serial_port = LaunchConfiguration("serial_port")
+    baud_rate = LaunchConfiguration("baud_rate")
+    write_rate_hz = LaunchConfiguration("write_rate_hz")
 
     # Get the package path
     pkg_manipulator_path = FindPackageShare('manipulator')
@@ -34,6 +57,12 @@ def generate_launch_description():
             PathJoinSubstitution([FindExecutable(name="xacro")]),
             " ",
             xacro_file,
+            " serial_port:=",
+            serial_port,
+            " baud_rate:=",
+            baud_rate,
+            " write_rate_hz:=",
+            write_rate_hz,
         ]
     )
     robot_description = {"robot_description": robot_description_content}

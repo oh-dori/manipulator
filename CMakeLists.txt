@@ -7,7 +7,6 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-find_package(gazebo_ros2_control REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -26,6 +25,7 @@ if(BUILD_TESTING)
 endif()
 
 add_library(arduino_hardware_interface SHARED
+  src/arduino_serial_driver.cpp
   src/arduino_hardware_interface.cpp
 )
 
@@ -43,31 +43,14 @@ ament_target_dependencies(arduino_hardware_interface
 
 pluginlib_export_plugin_description_file(hardware_interface arduino_hardware_interface.xml)
 
-ament_package()
-
 install(
-  DIRECTORY urdf
+  DIRECTORY config launch meshes rviz urdf
   DESTINATION share/${PROJECT_NAME}
 )
 
 install(
-  DIRECTORY meshes
-  DESTINATION share/${PROJECT_NAME}
-)
-
-install(
-  DIRECTORY launch
-  DESTINATION share/${PROJECT_NAME}
-)
-
-install(
-  DIRECTORY rviz
-  DESTINATION share/${PROJECT_NAME}
-)
-
-install(
-  DIRECTORY config
-  DESTINATION share/${PROJECT_NAME}
+  DIRECTORY include/
+  DESTINATION include
 )
 
 install(
@@ -78,3 +61,8 @@ install(
   RUNTIME DESTINATION bin
   INCLUDES DESTINATION include
 )
+
+ament_export_targets(export_arduino_hardware_interface HAS_LIBRARY_TARGET)
+ament_export_dependencies(hardware_interface pluginlib rclcpp rclcpp_lifecycle)
+
+ament_package()

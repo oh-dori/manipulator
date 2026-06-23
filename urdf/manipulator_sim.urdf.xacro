@@ -19,7 +19,11 @@
     <xacro:ros2_control_joint joint_name="joint_3" min_pos="${-pi}"    max_pos="0"/>
     <xacro:ros2_control_joint joint_name="joint_4" min_pos="${-pi/2}" max_pos="${pi/2}"/>
     <xacro:ros2_control_joint joint_name="joint_5_left" min_pos="0" max_pos="0.008"/>
-    <xacro:ros2_control_joint joint_name="joint_5_right" min_pos="0" max_pos="0.008"/>
+    <joint name="joint_5_right">
+      <param name="mimic">joint_5_left</param>
+      <param name="multiplier">1</param>
+      <state_interface name="position"/>
+    </joint>
   </ros2_control>
 
   <!--

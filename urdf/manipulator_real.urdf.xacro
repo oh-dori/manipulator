@@ -1,6 +1,10 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="manipulator">
 
+  <xacro:arg name="serial_port" default="/dev/ttyUSB0"/>
+  <xacro:arg name="baud_rate" default="115200"/>
+  <xacro:arg name="write_rate_hz" default="20"/>
+
   <!-- 1. 공통 로봇 모델 포함 -->
   <xacro:include filename="$(find manipulator)/urdf/manipulator.xacro" />
 
@@ -13,14 +17,55 @@
     <hardware>
       <!-- 나중에 만들 실제 로봇용 하드웨어 인터페이스 플러그인 -->
       <plugin>arduino_hardware_interface/ArduinoHardwareInterface</plugin>
-      <param name="serial_port">/dev/ttyUSB0</param>
-      <param name="baud_rate">9600</param>
+      <param name="serial_port">$(arg serial_port)</param>
+      <param name="baud_rate">$(arg baud_rate)</param>
+      <param name="write_rate_hz">$(arg write_rate_hz)</param>
     </hardware>
-    <xacro:ros2_control_joint joint_name="joint_1" min_pos="${-pi/2}" max_pos="${pi/2}"/>
-    <xacro:ros2_control_joint joint_name="joint_2" min_pos="0"        max_pos="${pi}"/>
-    <xacro:ros2_control_joint joint_name="joint_3" min_pos="${-pi}"    max_pos="0"/>
-    <xacro:ros2_control_joint joint_name="joint_4" min_pos="${-pi/2}" max_pos="${pi/2}"/>
-    <xacro:ros2_control_joint joint_name="joint_5_left" min_pos="0" max_pos="0.008"/>
+    <joint name="joint_1">
+      <param name="servo_min_angle">0</param>
+      <param name="servo_max_angle">180</param>
+      <command_interface name="position">
+        <param name="min">${-pi/2}</param>
+        <param name="max">${pi/2}</param>
+      </command_interface>
+      <state_interface name="position"><param name="initial_value">0</param></state_interface>
+    </joint>
+    <joint name="joint_2">
+      <param name="servo_min_angle">0</param>
+      <param name="servo_max_angle">180</param>
+      <command_interface name="position">
+        <param name="min">0</param>
+        <param name="max">${pi}</param>
+      </command_interface>
+      <state_interface name="position"><param name="initial_value">${pi/2}</param></state_interface>
+    </joint>
+    <joint name="joint_3">
+      <param name="servo_min_angle">180</param>
+      <param name="servo_max_angle">0</param>
+      <command_interface name="position">
+        <param name="min">${-pi}</param>
+        <param name="max">0</param>
+      </command_interface>
+      <state_interface name="position"><param name="initial_value">${-pi/2}</param></state_interface>
+    </joint>
+    <joint name="joint_4">
+      <param name="servo_min_angle">0</param>
+      <param name="servo_max_angle">180</param>
+      <command_interface name="position">
+        <param name="min">${-pi/2}</param>
+        <param name="max">${pi/2}</param>
+      </command_interface>
+      <state_interface name="position"><param name="initial_value">0</param></state_interface>
+    </joint>
+    <joint name="joint_5_left">
+      <param name="servo_min_angle">0</param>
+      <param name="servo_max_angle">90</param>
+      <command_interface name="position">
+        <param name="min">0</param>
+        <param name="max">0.008</param>
+      </command_interface>
+      <state_interface name="position"><param name="initial_value">0</param></state_interface>
+    </joint>
   </ros2_control>
 
 </robot>

@@ -65,14 +65,15 @@
   </xacro:macro>
 
   <!-- ros2_control 조인트 인터페이스를 위한 매크로 -->
-  <xacro:macro name="ros2_control_joint" params="joint_name min_pos max_pos">
+  <xacro:macro name="ros2_control_joint" params="joint_name min_pos max_pos initial_pos=0.0">
     <joint name="${joint_name}">
       <command_interface name="position">
         <param name="min">${min_pos}</param>
         <param name="max">${max_pos}</param>
       </command_interface>
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
+      <state_interface name="position">
+        <param name="initial_value">${initial_pos}</param>
+      </state_interface>
     </joint>
   </xacro:macro>
 

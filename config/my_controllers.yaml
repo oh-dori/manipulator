@@ -16,9 +16,7 @@ joint_trajectory_controller:
       - joint_3
       - joint_4
       - joint_5_left
-      - joint_5_right
     command_interfaces:
       - position
     state_interfaces:
       - position
-      - velocity

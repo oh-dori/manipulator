@@ -1,8 +1,10 @@
 #ifndef MANIPULATOR_ARDUINO_HARDWARE_INTERFACE_HPP
 #define MANIPULATOR_ARDUINO_HARDWARE_INTERFACE_HPP
 
-#include <vector>
+#include <chrono>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "hardware_interface/system_interface.hpp"
 #include "hardware_interface/handle.hpp"
@@ -11,7 +13,6 @@
 #include "rclcpp/macros.hpp"
 #include "rclcpp_lifecycle/state.hpp"
 
-// 시리얼 통신을 위한 간단한 라이브러리 (예시)
 #include "visibility_control.h"
 #include "arduino_serial_driver.hpp"
 
@@ -44,9 +45,24 @@ public:
   hardware_interface::return_type write(const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 private:
+  struct JointMapping
+  {
+    double command_min;
+    double command_max;
+    double servo_min_angle;
+    double servo_max_angle;
+  };
+
+  double command_to_servo_angle(std::size_t joint_index, double command) const;
+
   std::unique_ptr<ArduinoSerialDriver> serial_driver_;
+  std::string serial_port_;
+  int baud_rate_{115200};
+  double write_rate_hz_{20.0};
+  std::chrono::steady_clock::time_point last_write_time_{};
+  std::vector<JointMapping> joint_mappings_;
   std::vector<double> hw_commands_;
-  std::vector<double> hw_states_;
+  std::vector<double> hw_positions_;
 };
 }  // namespace arduino_hardware_interface
 #endif // MANIPULATOR_ARDUINO_HARDWARE_INTERFACE_HPP

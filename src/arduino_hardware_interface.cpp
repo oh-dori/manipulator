@@ -1,115 +1,268 @@
 #include "arduino_hardware_interface.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <exception>
+#include <iomanip>
 #include <limits>
-#include <memory>
-#include <vector>
+#include <sstream>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
+#include "pluginlib/class_list_macros.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace arduino_hardware_interface
 {
+namespace
+{
+
+const rclcpp::Logger LOGGER = rclcpp::get_logger("ArduinoHardwareInterface");
+
+bool parse_double(
+  const std::string & value, const std::string & parameter_name, double & result)
+{
+  try {
+    std::size_t parsed_length = 0;
+    result = std::stod(value, &parsed_length);
+    if (parsed_length != value.size() || !std::isfinite(result)) {
+      throw std::invalid_argument("not a finite number");
+    }
+    return true;
+  } catch (const std::exception & error) {
+    RCLCPP_ERROR(
+      LOGGER, "Invalid value '%s' for parameter '%s': %s",
+      value.c_str(), parameter_name.c_str(), error.what());
+    return false;
+  }
+}
+
+}  // namespace
+
 hardware_interface::CallbackReturn ArduinoHardwareInterface::on_init(
   const hardware_interface::HardwareInfo & info)
 {
-  if (hardware_interface::SystemInterface::on_init(info) != hardware_interface::CallbackReturn::SUCCESS)
+  if (
+    hardware_interface::SystemInterface::on_init(info) !=
+    hardware_interface::CallbackReturn::SUCCESS)
   {
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  // URDF로부터 파라미터 읽기
-  const std::string serial_port = info_.hardware_parameters["serial_port"];
-  const int baud_rate = std::stoi(info_.hardware_parameters["baud_rate"]);
-  
-  // 시리얼 드라이버 초기화
+  const auto serial_port_it = info_.hardware_parameters.find("serial_port");
+  const auto baud_rate_it = info_.hardware_parameters.find("baud_rate");
+  if (
+    serial_port_it == info_.hardware_parameters.end() ||
+    baud_rate_it == info_.hardware_parameters.end())
+  {
+    RCLCPP_ERROR(LOGGER, "serial_port and baud_rate hardware parameters are required");
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  serial_port_ = serial_port_it->second;
+  try {
+    baud_rate_ = std::stoi(baud_rate_it->second);
+    const auto write_rate_it = info_.hardware_parameters.find("write_rate_hz");
+    if (write_rate_it != info_.hardware_parameters.end()) {
+      write_rate_hz_ = std::stod(write_rate_it->second);
+    }
+  } catch (const std::exception & error) {
+    RCLCPP_ERROR(LOGGER, "Invalid hardware parameter: %s", error.what());
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  if (write_rate_hz_ <= 0.0 || !std::isfinite(write_rate_hz_)) {
+    RCLCPP_ERROR(LOGGER, "write_rate_hz must be a finite positive number");
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  const std::size_t joint_count = info_.joints.size();
+  hw_commands_.resize(joint_count, 0.0);
+  hw_positions_.resize(joint_count, 0.0);
+  joint_mappings_.reserve(joint_count);
+
+  for (std::size_t index = 0; index < joint_count; ++index) {
+    const auto & joint = info_.joints[index];
+    if (
+      joint.command_interfaces.size() != 1 ||
+      joint.command_interfaces[0].name != hardware_interface::HW_IF_POSITION)
+    {
+      RCLCPP_ERROR(
+        LOGGER, "Joint '%s' must expose exactly one position command interface",
+        joint.name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+    if (
+      joint.state_interfaces.size() != 1 ||
+      joint.state_interfaces[0].name != hardware_interface::HW_IF_POSITION)
+    {
+      RCLCPP_ERROR(
+        LOGGER, "Joint '%s' must expose exactly one position state interface",
+        joint.name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    double command_min = 0.0;
+    double command_max = 0.0;
+    double servo_min = 0.0;
+    double servo_max = 180.0;
+
+    const auto & command_interface = joint.command_interfaces[0];
+    if (
+      !parse_double(command_interface.min, joint.name + ".command.min", command_min) ||
+      !parse_double(command_interface.max, joint.name + ".command.max", command_max))
+    {
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    const auto servo_min_it = joint.parameters.find("servo_min_angle");
+    const auto servo_max_it = joint.parameters.find("servo_max_angle");
+    if (
+      servo_min_it == joint.parameters.end() ||
+      servo_max_it == joint.parameters.end() ||
+      !parse_double(servo_min_it->second, joint.name + ".servo_min_angle", servo_min) ||
+      !parse_double(servo_max_it->second, joint.name + ".servo_max_angle", servo_max))
+    {
+      RCLCPP_ERROR(
+        LOGGER, "Joint '%s' requires servo_min_angle and servo_max_angle parameters",
+        joint.name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    if (command_min >= command_max) {
+      RCLCPP_ERROR(LOGGER, "Joint '%s' has an invalid command range", joint.name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    double initial_position = 0.0;
+    const auto initial_value_it = joint.state_interfaces[0].initial_value;
+    if (
+      !initial_value_it.empty() &&
+      !parse_double(initial_value_it, joint.name + ".initial_value", initial_position))
+    {
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    initial_position = std::clamp(initial_position, command_min, command_max);
+    hw_commands_[index] = initial_position;
+    hw_positions_[index] = initial_position;
+    joint_mappings_.push_back({command_min, command_max, servo_min, servo_max});
+  }
+
   serial_driver_ = std::make_unique<ArduinoSerialDriver>();
-  if (!serial_driver_->open(serial_port, baud_rate))
-  {
-    RCLCPP_FATAL(rclcpp::get_logger("ArduinoHardwareInterface"), "Failed to open serial port %s", serial_port.c_str());
-    return hardware_interface::CallbackReturn::ERROR;
-  }
-
-  // 상태 및 커맨드 벡터 초기화
-  hw_commands_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
-  hw_states_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
-
-  RCLCPP_INFO(rclcpp::get_logger("ArduinoHardwareInterface"), "Successfully initialized!");
+  RCLCPP_INFO(
+    LOGGER, "Configured %zu joints for %s at %d baud (write rate %.1f Hz)",
+    joint_count, serial_port_.c_str(), baud_rate_, write_rate_hz_);
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
-std::vector<hardware_interface::StateInterface> ArduinoHardwareInterface::export_state_interfaces()
+std::vector<hardware_interface::StateInterface>
+ArduinoHardwareInterface::export_state_interfaces()
 {
   std::vector<hardware_interface::StateInterface> state_interfaces;
-  for (uint i = 0; i < info_.joints.size(); i++)
-  {
-    state_interfaces.emplace_back(hardware_interface::StateInterface(
-      info_.joints[i].name, hardware_interface::HW_IF_POSITION, &hw_states_[i]));
+  state_interfaces.reserve(info_.joints.size());
+  for (std::size_t index = 0; index < info_.joints.size(); ++index) {
+    state_interfaces.emplace_back(
+      info_.joints[index].name, hardware_interface::HW_IF_POSITION, &hw_positions_[index]);
   }
   return state_interfaces;
 }
 
-std::vector<hardware_interface::CommandInterface> ArduinoHardwareInterface::export_command_interfaces()
+std::vector<hardware_interface::CommandInterface>
+ArduinoHardwareInterface::export_command_interfaces()
 {
   std::vector<hardware_interface::CommandInterface> command_interfaces;
-  for (uint i = 0; i < info_.joints.size(); i++)
-  {
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(
-      info_.joints[i].name, hardware_interface::HW_IF_POSITION, &hw_commands_[i]));
+  command_interfaces.reserve(info_.joints.size());
+  for (std::size_t index = 0; index < info_.joints.size(); ++index) {
+    command_interfaces.emplace_back(
+      info_.joints[index].name, hardware_interface::HW_IF_POSITION, &hw_commands_[index]);
   }
   return command_interfaces;
 }
 
 hardware_interface::CallbackReturn ArduinoHardwareInterface::on_activate(
-  const rclcpp_lifecycle::State & /*previous_state*/)
+  const rclcpp_lifecycle::State &)
 {
-  RCLCPP_INFO(rclcpp::get_logger("ArduinoHardwareInterface"), "Activating ...please wait...");
-  // 초기 위치 설정 등
-  RCLCPP_INFO(rclcpp::get_logger("ArduinoHardwareInterface"), "Successfully activated!");
+  if (!serial_driver_->open(serial_port_, baud_rate_)) {
+    RCLCPP_ERROR(LOGGER, "Failed to open serial port: %s", serial_driver_->last_error().c_str());
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  hw_commands_ = hw_positions_;
+  last_write_time_ = {};
+  RCLCPP_INFO(LOGGER, "Arduino hardware interface activated");
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 hardware_interface::CallbackReturn ArduinoHardwareInterface::on_deactivate(
-  const rclcpp_lifecycle::State & /*previous_state*/)
+  const rclcpp_lifecycle::State &)
 {
-  RCLCPP_INFO(rclcpp::get_logger("ArduinoHardwareInterface"), "Deactivating ...please wait...");
   serial_driver_->close();
-  RCLCPP_INFO(rclcpp::get_logger("ArduinoHardwareInterface"), "Successfully deactivated!");
+  RCLCPP_INFO(LOGGER, "Arduino hardware interface deactivated");
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 hardware_interface::return_type ArduinoHardwareInterface::read(
-  const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
+  const rclcpp::Time &, const rclcpp::Duration &)
 {
-  // 서보모터는 피드백이 없으므로, 마지막으로 보낸 명령을 현재 상태로 간주 (Open-loop)
-  for (uint i = 0; i < hw_commands_.size(); i++)
-  {
-    hw_states_[i] = hw_commands_[i];
-  }
+  // The hobby servos do not return position feedback. Report the last accepted command.
+  hw_positions_ = hw_commands_;
   return hardware_interface::return_type::OK;
 }
 
 hardware_interface::return_type ArduinoHardwareInterface::write(
-  const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
+  const rclcpp::Time &, const rclcpp::Duration &)
 {
-  // ros2_control로부터 받은 명령(라디안)을 아두이노로 전송 (0-180도 변환 필요)
-  std::string msg = "";
-  for (uint i = 0; i < hw_commands_.size(); i++)
+  const auto now = std::chrono::steady_clock::now();
+  const auto minimum_period = std::chrono::duration<double>(1.0 / write_rate_hz_);
+  if (
+    last_write_time_ != std::chrono::steady_clock::time_point{} &&
+    now - last_write_time_ < minimum_period)
   {
-    // 라디안을 각도로 변환 (예시: joint_1은 -90~90도, joint_2는 0~180도 등 URDF에 맞춰 변환)
-    // 이 부분은 각 조인트의 특성에 맞게 정교한 변환 로직이 필요합니다.
-    // 간단한 예시로 0~180도로 변환
-    int angle = static_cast<int>((hw_commands_[i] + M_PI/2) * 180.0 / M_PI);
-    angle = std::max(0, std::min(180, angle)); // 0-180 범위 제한
-    msg += std::to_string(angle) + ",";
+    return hardware_interface::return_type::OK;
   }
-  serial_driver_->write(msg + "\n");
+
+  std::ostringstream message;
+  message << std::fixed << std::setprecision(0);
+  for (std::size_t index = 0; index < hw_commands_.size(); ++index) {
+    if (!std::isfinite(hw_commands_[index])) {
+      RCLCPP_ERROR(LOGGER, "Joint '%s' received a non-finite command", info_.joints[index].name.c_str());
+      return hardware_interface::return_type::ERROR;
+    }
+    if (index > 0) {
+      message << ',';
+    }
+    message << command_to_servo_angle(index, hw_commands_[index]);
+  }
+  message << '\n';
+
+  if (!serial_driver_->write(message.str())) {
+    RCLCPP_ERROR(LOGGER, "Serial write failed: %s", serial_driver_->last_error().c_str());
+    return hardware_interface::return_type::ERROR;
+  }
+
+  last_write_time_ = now;
   return hardware_interface::return_type::OK;
 }
+
+double ArduinoHardwareInterface::command_to_servo_angle(
+  std::size_t joint_index, double command) const
+{
+  const auto & mapping = joint_mappings_[joint_index];
+  const double clamped_command = std::clamp(
+    command, mapping.command_min, mapping.command_max);
+  const double ratio =
+    (clamped_command - mapping.command_min) /
+    (mapping.command_max - mapping.command_min);
+  return mapping.servo_min_angle +
+         ratio * (mapping.servo_max_angle - mapping.servo_min_angle);
+}
+
 }  // namespace arduino_hardware_interface
 
-#include "pluginlib/class_list_macros.hpp"
 PLUGINLIB_EXPORT_CLASS(
-  arduino_hardware_interface::ArduinoHardwareInterface, hardware_interface::SystemInterface)
+  arduino_hardware_interface::ArduinoHardwareInterface,
+  hardware_interface::SystemInterface)
