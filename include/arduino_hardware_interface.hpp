@@ -59,7 +59,9 @@ private:
   std::string serial_port_;
   int baud_rate_{115200};
   double write_rate_hz_{20.0};
+  bool dry_run_{false};
   std::chrono::steady_clock::time_point last_write_time_{};
+  std::string last_command_message_;
   std::vector<JointMapping> joint_mappings_;
   std::vector<double> hw_commands_;
   std::vector<double> hw_positions_;

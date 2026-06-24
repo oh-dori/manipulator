@@ -9,6 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <cctype>
 #include <vector>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
@@ -38,6 +39,30 @@ bool parse_double(
       value.c_str(), parameter_name.c_str(), error.what());
     return false;
   }
+}
+
+bool parse_bool(
+  const std::string & value, const std::string & parameter_name, bool & result)
+{
+  std::string normalized;
+  normalized.reserve(value.size());
+  for (const char character : value) {
+    normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
+  }
+
+  if (normalized == "true" || normalized == "1") {
+    result = true;
+    return true;
+  }
+  if (normalized == "false" || normalized == "0") {
+    result = false;
+    return true;
+  }
+
+  RCLCPP_ERROR(
+    LOGGER, "Invalid value '%s' for parameter '%s': expected true/false or 1/0",
+    value.c_str(), parameter_name.c_str());
+  return false;
 }
 
 }  // namespace
@@ -71,6 +96,14 @@ hardware_interface::CallbackReturn ArduinoHardwareInterface::on_init(
     }
   } catch (const std::exception & error) {
     RCLCPP_ERROR(LOGGER, "Invalid hardware parameter: %s", error.what());
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  const auto dry_run_it = info_.hardware_parameters.find("dry_run");
+  if (
+    dry_run_it != info_.hardware_parameters.end() &&
+    !parse_bool(dry_run_it->second, "dry_run", dry_run_))
+  {
     return hardware_interface::CallbackReturn::ERROR;
   }
 
@@ -154,8 +187,8 @@ hardware_interface::CallbackReturn ArduinoHardwareInterface::on_init(
 
   serial_driver_ = std::make_unique<ArduinoSerialDriver>();
   RCLCPP_INFO(
-    LOGGER, "Configured %zu joints for %s at %d baud (write rate %.1f Hz)",
-    joint_count, serial_port_.c_str(), baud_rate_, write_rate_hz_);
+    LOGGER, "Configured %zu joints for %s at %d baud (write rate %.1f Hz, dry_run: %s)",
+    joint_count, serial_port_.c_str(), baud_rate_, write_rate_hz_, dry_run_ ? "true" : "false");
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -186,13 +219,22 @@ ArduinoHardwareInterface::export_command_interfaces()
 hardware_interface::CallbackReturn ArduinoHardwareInterface::on_activate(
   const rclcpp_lifecycle::State &)
 {
+  hw_commands_ = hw_positions_;
+  last_write_time_ = {};
+  last_command_message_.clear();
+
+  if (dry_run_) {
+    RCLCPP_WARN(
+      LOGGER,
+      "Arduino hardware interface activated in dry-run mode; serial port will not be opened");
+    return hardware_interface::CallbackReturn::SUCCESS;
+  }
+
   if (!serial_driver_->open(serial_port_, baud_rate_)) {
     RCLCPP_ERROR(LOGGER, "Failed to open serial port: %s", serial_driver_->last_error().c_str());
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  hw_commands_ = hw_positions_;
-  last_write_time_ = {};
   RCLCPP_INFO(LOGGER, "Arduino hardware interface activated");
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -200,7 +242,9 @@ hardware_interface::CallbackReturn ArduinoHardwareInterface::on_activate(
 hardware_interface::CallbackReturn ArduinoHardwareInterface::on_deactivate(
   const rclcpp_lifecycle::State &)
 {
-  serial_driver_->close();
+  if (!dry_run_) {
+    serial_driver_->close();
+  }
   RCLCPP_INFO(LOGGER, "Arduino hardware interface deactivated");
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -238,6 +282,16 @@ hardware_interface::return_type ArduinoHardwareInterface::write(
     message << command_to_servo_angle(index, hw_commands_[index]);
   }
   message << '\n';
+
+  if (dry_run_) {
+    const auto command_message = message.str();
+    if (command_message != last_command_message_) {
+      RCLCPP_INFO(LOGGER, "[dry-run] Arduino CSV: %s", command_message.c_str());
+      last_command_message_ = command_message;
+    }
+    last_write_time_ = now;
+    return hardware_interface::return_type::OK;
+  }
 
   if (!serial_driver_->write(message.str())) {
     RCLCPP_ERROR(LOGGER, "Serial write failed: %s", serial_driver_->last_error().c_str());

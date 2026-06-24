@@ -2,8 +2,9 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="manipulator">
 
   <xacro:arg name="serial_port" default="/dev/ttyUSB0"/>
-  <xacro:arg name="baud_rate" default="115200"/>
+  <xacro:arg name="baud_rate" default="9600"/>
   <xacro:arg name="write_rate_hz" default="20"/>
+  <xacro:arg name="dry_run" default="false"/>
 
   <!-- 1. 공통 로봇 모델 포함 -->
   <xacro:include filename="$(find manipulator)/urdf/manipulator.xacro" />
@@ -20,6 +21,7 @@
       <param name="serial_port">$(arg serial_port)</param>
       <param name="baud_rate">$(arg baud_rate)</param>
       <param name="write_rate_hz">$(arg write_rate_hz)</param>
+      <param name="dry_run">$(arg dry_run)</param>
     </hardware>
     <joint name="joint_1">
       <param name="servo_min_angle">0</param>
@@ -37,16 +39,16 @@
         <param name="min">0</param>
         <param name="max">${pi}</param>
       </command_interface>
-      <state_interface name="position"><param name="initial_value">${pi/2}</param></state_interface>
+      <state_interface name="position"><param name="initial_value">0</param></state_interface>
     </joint>
     <joint name="joint_3">
-      <param name="servo_min_angle">180</param>
-      <param name="servo_max_angle">0</param>
+      <param name="servo_min_angle">0</param>
+      <param name="servo_max_angle">180</param>
       <command_interface name="position">
         <param name="min">${-pi}</param>
         <param name="max">0</param>
       </command_interface>
-      <state_interface name="position"><param name="initial_value">${-pi/2}</param></state_interface>
+      <state_interface name="position"><param name="initial_value">0</param></state_interface>
     </joint>
     <joint name="joint_4">
       <param name="servo_min_angle">0</param>
@@ -58,13 +60,13 @@
       <state_interface name="position"><param name="initial_value">0</param></state_interface>
     </joint>
     <joint name="joint_5_left">
-      <param name="servo_min_angle">0</param>
+      <param name="servo_min_angle">30</param>
       <param name="servo_max_angle">90</param>
       <command_interface name="position">
         <param name="min">0</param>
         <param name="max">0.008</param>
       </command_interface>
-      <state_interface name="position"><param name="initial_value">0</param></state_interface>
+      <state_interface name="position"><param name="initial_value">0.008</param></state_interface>
     </joint>
   </ros2_control>
 

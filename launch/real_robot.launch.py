@@ -25,7 +25,7 @@ def generate_launch_description():
     declared_arguments.append(
         DeclareLaunchArgument(
             "baud_rate",
-            default_value="115200",
+            default_value="9600",
             description="Arduino serial baud rate",
         )
     )
@@ -36,12 +36,20 @@ def generate_launch_description():
             description="Maximum serial command rate",
         )
     )
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "dry_run",
+            default_value="false",
+            description="If true, print Arduino CSV commands without opening the serial port",
+        )
+    )
 
     # Initialize Arguments
     use_sim_time = LaunchConfiguration("use_sim_time")
     serial_port = LaunchConfiguration("serial_port")
     baud_rate = LaunchConfiguration("baud_rate")
     write_rate_hz = LaunchConfiguration("write_rate_hz")
+    dry_run = LaunchConfiguration("dry_run")
 
     # Get the package path
     pkg_manipulator_path = FindPackageShare('manipulator')
@@ -63,9 +71,15 @@ def generate_launch_description():
             baud_rate,
             " write_rate_hz:=",
             write_rate_hz,
+            " dry_run:=",
+            dry_run,
         ]
     )
     robot_description = {"robot_description": robot_description_content}
+
+    rviz_config_file = PathJoinSubstitution(
+        [pkg_manipulator_path, "rviz", "display.rviz"]
+    )
 
     # ros2_control 노드: 하드웨어 인터페이스와 컨트롤러 매니저를 로드합니다.
     ros2_control_node = Node(
@@ -98,9 +112,18 @@ def generate_launch_description():
         arguments=["joint_trajectory_controller", "--controller-manager", "/controller_manager"],
     )
 
+    rviz_node = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="rviz2",
+        output="screen",
+        arguments=["-d", rviz_config_file],
+    )
+
     return LaunchDescription(declared_arguments + [
         ros2_control_node,
         robot_state_publisher_node,
         joint_state_broadcaster_spawner,
         joint_trajectory_controller_spawner,
+        rviz_node,
     ])

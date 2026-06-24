@@ -179,23 +179,332 @@ URDF(robot_description) ───────── robot_state_publisher ──
 
 ## 3. 실제 로봇 제어 설정 — manipulator_real.urdf.xacro + my_controllers.yaml
 
-앞의 `manipulator.xacro`는 형상만 정의한다. 실제 로봇을 제어하려면 두 가지 설정을 더 붙인다.
-
-첫째, `manipulator_real.urdf.xacro`는 공통 모델에 `<ros2_control>` 블록을 더해, 어떤 하드웨어 플러그인(`ArduinoHardwareInterface`)을 쓸지와 각 조인트의 명령 범위·서보 보정값을 선언한다.
-
-둘째, `my_controllers.yaml`은 어떤 컨트롤러를 띄울지 정한다. 다음 5축을 제어한다.
+2번의 `display.launch.py`에서는 로봇을 실제로 움직인 것이 아니다. 사용자가 GUI 슬라이더를 움직이면 가짜 `/joint_states`가 만들어지고, `robot_state_publisher`가 그 값을 TF로 바꿔 RViz에 보여줬다.
 
 ```text
-joint_1
-joint_2
-joint_3
-joint_4
-joint_5_left
+joint_state_publisher_gui
+  -> /joint_states
+  -> robot_state_publisher
+  -> /tf
+  -> RViz
 ```
 
-명령과 상태 인터페이스는 모두 `position`이다.
+이 흐름에는 Arduino가 없다. 서보로 명령을 보내는 부분도 없고, 시리얼 포트를 여는 부분도 없다.
 
-`joint_5_right`는 독립 controller joint가 아니다. Gazebo에서는 mimic 파라미터가 왼쪽 상태를 오른쪽에 적용하고, 실물에서는 하나의 그리퍼 서보가 양쪽 기구를 움직인다고 가정한다.
+실제 로봇에서는 중간에 이런 부품이 하나 더 필요하다.
+
+```text
+ROS 2 controller
+  -> 조인트 위치 명령
+  -> ArduinoHardwareInterface
+  -> 서보 각도 CSV
+  -> Arduino
+```
+
+`ArduinoHardwareInterface`는 이 프로젝트에서 만든 C++ 중간 어댑터다. ROS 2 쪽에서는 `joint_1 = 0.5 rad` 같은 조인트 위치 명령을 받고, Arduino 쪽으로는 `90,120,45,90,30` 같은 서보 각도 CSV를 보낸다.
+
+3장은 이 중간 어댑터를 ROS 2 제어 흐름에 끼워 넣기 위한 설정을 읽는 구간이다.
+
+```text
+manipulator_real.urdf.xacro
+  "이 로봇은 ArduinoHardwareInterface로 제어한다"는 정보를 URDF에 추가한다.
+
+my_controllers.yaml
+  "어떤 controller를 실행해서 명령과 상태를 처리할지" 정한다.
+```
+
+여기서 controller는 ROS 2에서 조인트 명령과 상태를 처리하는 부품이다. 하드웨어에 position 명령을 쓰는 controller도 있고, 하드웨어 상태를 `/joint_states`로 내보내는 controller도 있다.
+
+### ① manipulator_real.urdf.xacro — 하드웨어 연결 설명서
+
+`manipulator.xacro`는 로봇의 모양과 관절 구조만 설명한다.
+
+```text
+link
+joint
+mesh
+mimic
+```
+
+그래서 실제 로봇용 파일인 `manipulator_real.urdf.xacro`는 이 기본 모델을 먼저 가져온다.
+
+```xml
+<xacro:include filename="$(find manipulator)/urdf/manipulator.xacro" />
+```
+
+이제 로봇의 모양은 준비됐다. 하지만 아직 ROS 2는 다음을 모른다.
+
+```text
+Arduino와 어떻게 연결하지?
+어떤 C++ 하드웨어 코드를 써야 하지?
+어떤 joint를 실제로 제어하지?
+조인트 명령 범위와 서보 각도 범위는 어떻게 맞추지?
+```
+
+이 질문에 답하는 부분이 `<ros2_control>` 블록이다.
+
+```xml
+<ros2_control name="RealRobot" type="system">
+  ...
+</ros2_control>
+```
+
+`type="system"`은 여러 조인트를 하나의 하드웨어 장치처럼 다룬다는 뜻이다. 이 프로젝트에서는 Arduino 하나가 여러 서보를 함께 제어하므로 system으로 둔다.
+
+먼저 어떤 하드웨어 어댑터를 쓸지 적는다.
+
+```xml
+<hardware>
+  <plugin>arduino_hardware_interface/ArduinoHardwareInterface</plugin>
+  <param name="serial_port">$(arg serial_port)</param>
+  <param name="baud_rate">$(arg baud_rate)</param>
+  <param name="write_rate_hz">$(arg write_rate_hz)</param>
+  <param name="dry_run">$(arg dry_run)</param>
+</hardware>
+```
+
+`plugin` 줄은 "Arduino와 통신할 때 `ArduinoHardwareInterface`를 사용한다"는 뜻이다. 이 이름을 보고 ros2_control이 C++ 플러그인을 불러온다.
+
+아래 값들은 Arduino 연결과 테스트 모드 설정이다.
+
+```text
+serial_port
+  Arduino가 잡힌 장치 경로. 예: /dev/ttyUSB0, /dev/ttyACM0
+
+baud_rate
+  Arduino와 맞출 시리얼 통신 속도. 현재 arm.ino 기준 기본값은 9600
+
+write_rate_hz
+  Arduino로 명령을 최대 몇 Hz로 보낼지 정하는 값
+
+dry_run
+  true이면 시리얼 포트를 열지 않고, Arduino로 보낼 CSV 값만 로그로 출력한다.
+```
+
+이 값들은 컴퓨터나 연결 상태에 따라 바뀔 수 있으므로 xacro 인자로 빼두었다. 아래 줄들은 "이 xacro 파일은 `serial_port`, `baud_rate`, `write_rate_hz`, `dry_run`이라는 값을 받을 수 있다"는 선언이다. 실제 실행에서는 `real_robot.launch.py`가 launch 인자를 받고, 그 값을 xacro 명령에 넘겨 완성된 URDF를 만든다.
+
+```xml
+<xacro:arg name="serial_port" default="/dev/ttyUSB0"/>
+<xacro:arg name="baud_rate" default="9600"/>
+<xacro:arg name="write_rate_hz" default="20"/>
+<xacro:arg name="dry_run" default="false"/>
+```
+
+그래서 실행할 때 포트나 dry-run 여부를 바꿔 줄 수 있다. launch에서 받은 값이 xacro로 들어가 `robot_description`에 포함되는 흐름은 아래의 `③ real_robot.launch.py에서 묶이는 방식`에서 다시 본다.
+
+```bash
+ros2 launch manipulator real_robot.launch.py serial_port:=/dev/ttyACM0
+```
+
+Arduino 없이 안전하게 흐름만 확인하려면 dry-run을 켠다.
+
+```bash
+ros2 launch manipulator real_robot.launch.py dry_run:=true
+```
+
+다음으로 실제 제어할 joint를 적는다. 예를 들어 `joint_1`은 이렇게 설정되어 있다.
+
+```xml
+<joint name="joint_1">
+  <param name="servo_min_angle">0</param>
+  <param name="servo_max_angle">180</param>
+  <command_interface name="position">
+    <param name="min">${-pi/2}</param>
+    <param name="max">${pi/2}</param>
+  </command_interface>
+  <state_interface name="position">
+    <param name="initial_value">0</param>
+  </state_interface>
+</joint>
+```
+
+이 블록은 세 가지를 말한다.
+
+```text
+1. joint_1은 position 명령으로 제어한다.
+2. joint_1의 현재 상태도 position으로 제공한다.
+3. ROS 쪽 조인트 범위와 실제 서보 각도 범위를 연결한다.
+```
+
+`command_interface`는 controller가 하드웨어에 쓰는 명령 통로다. 여기서는 전부 `position`이다.
+
+`state_interface`는 하드웨어가 ROS 쪽에 알려주는 상태 통로다. 이것도 여기서는 `position`이다.
+
+`min`, `max`는 ROS 쪽 조인트 값의 범위다. 회전 조인트는 radian 단위이고, 그리퍼처럼 직선 이동하는 prismatic 조인트는 meter 단위다.
+
+`servo_min_angle`, `servo_max_angle`은 Arduino 서보에 보낼 실제 각도 범위다. 이 값은 표준 URDF 값이 아니라 `ArduinoHardwareInterface`가 읽는 커스텀 파라미터다.
+
+서보 장착 방향이 ROS joint 방향과 맞지 않으면 이 두 값을 서로 바꿔서 보정할 수 있다.
+
+```xml
+<param name="servo_min_angle">180</param>
+<param name="servo_max_angle">0</param>
+```
+
+이렇게 하면 ROS 쪽 조인트 명령이 커질수록 Arduino로 보내는 서보 각도는 작아진다. 현재 `joint_3`은 RViz의 초기 자세와 Arduino 초기 서보값을 맞추기 위해 `0 -> 180` 방향으로 둔다.
+
+그리퍼인 `joint_5_left`는 회전 조인트가 아니라 직선 이동 조인트다.
+
+```xml
+<command_interface name="position">
+  <param name="min">0</param>
+  <param name="max">0.008</param>
+</command_interface>
+```
+
+`0.008`은 8 mm다. `ArduinoHardwareInterface`는 이 0~0.008 m 값을 다시 30~90도 서보 각도로 바꿔 Arduino에 보낸다.
+
+`joint_5_right`는 `<ros2_control>` 블록에 없다. 실물에서는 하나의 그리퍼 서보가 양쪽을 같이 움직인다고 보고, 모델에서는 `joint_5_right`가 `joint_5_left`를 mimic한다.
+
+### ② my_controllers.yaml — controller 실행 목록
+
+`manipulator_real.urdf.xacro`까지 읽으면 하드웨어 어댑터와 제어할 joint는 알 수 있다. 하지만 아직 "ROS 2 안에서 누가 명령을 받고, 누가 상태를 내보낼지"는 정하지 않았다.
+
+그 설정이 `my_controllers.yaml`이다.
+
+먼저 ros2_control의 실행 구조를 구분해서 보자.
+
+```text
+controller_manager 패키지
+  ROS 2가 제공하는 패키지 이름
+
+ros2_control_node
+  controller_manager 패키지 안에 있는 실행 노드
+  real_robot.launch.py가 이 노드를 실행한다.
+
+controller
+  ros2_control_node 안에서 로드되어 동작하는 제어 부품
+  이 프로젝트에서는 아래 두 개를 쓴다.
+```
+
+```text
+joint_state_broadcaster
+  상태 담당 controller
+  하드웨어 상태를 /joint_states로 내보낸다.
+
+joint_trajectory_controller
+  명령 담당 controller
+  목표 궤적을 받아 조인트 position 명령을 만든다.
+```
+
+즉 여기서 controller는 독립적으로 launch되는 노드라기보다, `ros2_control_node` 안에 들어가서 동작하는 제어 모듈에 가깝다.
+
+이제 YAML을 읽어보자. 먼저 `ros2_control_node`의 갱신 주기를 정한다.
+
+```yaml
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+```
+
+`update_rate: 100`은 초당 100번 정도 다음 흐름을 반복한다는 뜻이다.
+
+```text
+하드웨어 상태 읽기
+-> controller 계산
+-> 하드웨어 명령 쓰기
+```
+
+그 아래에는 `ros2_control_node` 안에 로드할 controller 종류를 등록한다.
+
+```yaml
+joint_state_broadcaster:
+  type: joint_state_broadcaster/JointStateBroadcaster
+
+joint_trajectory_controller:
+  type: joint_trajectory_controller/JointTrajectoryController
+```
+
+여기서 `type`은 어떤 controller 플러그인을 불러올지 적는 이름이다. 직접 만든 클래스 이름이 아니라, ROS 2 controller 패키지들이 제공하는 등록 이름이다.
+
+둘의 역할은 다음처럼 다르다.
+
+```text
+joint_state_broadcaster
+  하드웨어의 state_interface를 읽어 /joint_states를 발행한다.
+  실제 로봇 실행에서는 2번의 joint_state_publisher_gui 대신 이 controller가 상태를 내보낸다.
+
+joint_trajectory_controller
+  목표 궤적 명령을 받아 각 joint의 command_interface에 position 명령을 쓴다.
+```
+
+마지막으로 `joint_trajectory_controller`가 어떤 joint를 제어할지 적는다.
+
+```yaml
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - joint_1
+      - joint_2
+      - joint_3
+      - joint_4
+      - joint_5_left
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+```
+
+이 목록은 `manipulator_real.urdf.xacro`의 `<ros2_control>` 블록에 있는 joint 이름과 맞아야 한다.
+
+```text
+URDF의 <ros2_control>에 joint_1이 있음
+YAML의 joints 목록에도 joint_1이 있음
+-> controller가 joint_1을 제어할 수 있음
+
+YAML에는 joint_5_right가 없음
+-> controller가 직접 제어하지 않음
+```
+
+### ③ real_robot.launch.py에서 묶이는 방식
+
+`manipulator_real.urdf.xacro`와 `my_controllers.yaml`은 파일만 있어서는 실행되지 않는다. launch 파일이 둘을 노드에 전달한다.
+
+`real_robot.launch.py`는 먼저 xacro를 실행해 실제 URDF 문자열을 만든다. 이때 시리얼 포트 같은 실행 인자도 함께 넘긴다.
+
+```text
+manipulator_real.urdf.xacro
+  + serial_port
+  + baud_rate
+  + write_rate_hz
+  + dry_run
+  -> 완성된 URDF 문자열
+  -> robot_description 파라미터
+```
+
+그 다음 같은 `robot_description`을 두 노드에 넣는다.
+
+```text
+robot_state_publisher 노드
+  robot_description을 읽고 link/joint 구조로 TF를 발행한다.
+
+ros2_control_node 노드
+  robot_description 안의 <ros2_control> 블록을 읽는다.
+  my_controllers.yaml도 함께 읽는다.
+  ArduinoHardwareInterface와 controller들을 연결한다.
+
+rviz2 노드
+  /tf와 robot_description을 받아 실제 제어 흐름에서 로봇 모델이 어떻게 움직이는지 보여준다.
+```
+
+최종 흐름은 다음과 같다.
+
+```text
+외부의 JointTrajectory 명령
+  -> joint_trajectory_controller
+  -> 5개 position command interface
+  -> ArduinoHardwareInterface::write()
+  -> radian/meter 명령을 서보 각도로 변환
+  -> Arduino로 CSV 전송
+
+ArduinoHardwareInterface::read()
+  -> 5개 position state interface
+  -> joint_state_broadcaster
+  -> /joint_states
+  -> robot_state_publisher
+  -> /tf, /tf_static
+  -> RViz
+```
 
 ---
 
@@ -252,7 +561,7 @@ servo = servo_min_angle + ratio × (servo_max_angle - servo_min_angle)
 
 이 방식은 회전 조인트뿐 아니라 미터 단위인 prismatic 그리퍼에도 동일하게 적용된다.
 
-`joint_3`처럼 서보 방향이 반대인 경우 `servo_min_angle=180`, `servo_max_angle=0`으로 설정한다.
+서보 방향이 반대인 경우에는 `servo_min_angle`과 `servo_max_angle`을 서로 바꿔서 보정한다.
 
 ### 100 Hz 제어와 20 Hz 시리얼
 
@@ -373,6 +682,10 @@ ros2 topic echo /joint_states
 ros2 launch manipulator real_robot.launch.py serial_port:=/dev/ttyACM0
 ```
 
+- Arduino 없이 테스트할 때는 `dry_run:=true`로 실행했는지
+- dry-run에서 시리얼 포트를 열지 않고 Arduino로 보낼 CSV만 출력하는지
+- RViz가 함께 뜨고 `/joint_states` → `/tf` 흐름으로 모델이 움직이는지
+- 실제 Arduino에 보낼 때는 기본값인 `dry_run:=false`로 실행하는지
 - 실행 사용자가 시리얼 장치 권한을 갖는지
 - Arduino 보드레이트가 launch 값과 같은지
 - 서보를 기구물에 연결하기 전에 최소·중립·최대 방향이 맞는지
