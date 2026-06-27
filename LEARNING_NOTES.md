@@ -334,14 +334,23 @@ ros2 launch manipulator real_robot.launch.py dry_run:=true
 
 `servo_min_angle`, `servo_max_angle`은 Arduino 서보에 보낼 실제 각도 범위다. 이 값은 표준 URDF 값이 아니라 `ArduinoHardwareInterface`가 읽는 커스텀 파라미터다.
 
-서보 장착 방향이 ROS joint 방향과 맞지 않으면 이 두 값을 서로 바꿔서 보정할 수 있다.
+서보 장착 방향이 ROS joint 방향과 반대라면 아래처럼 두 값을 서로 바꿔서 보정할 수 있다.
 
 ```xml
 <param name="servo_min_angle">180</param>
 <param name="servo_max_angle">0</param>
 ```
 
-이렇게 하면 ROS 쪽 조인트 명령이 커질수록 Arduino로 보내는 서보 각도는 작아진다. 현재 `joint_3`은 RViz의 초기 자세와 Arduino 초기 서보값을 맞추기 위해 `0 -> 180` 방향으로 둔다.
+이 경우 ROS 쪽 조인트 명령이 커질수록 Arduino로 보내는 서보 각도는 작아진다.
+
+현재 `joint_3`에는 이 반전 설정을 사용하지 않는다. ROS 명령 범위 `-pi ~ 0`을 서보 각도 `0 ~ 180`에 대응시킨다.
+
+```text
+ROS -pi rad -> Arduino 0도
+ROS   0 rad -> Arduino 180도
+```
+
+따라서 `joint_3`의 ROS 초기값 `0`은 Arduino 코드의 초기 서보 각도 `180도`와 일치한다.
 
 그리퍼인 `joint_5_left`는 회전 조인트가 아니라 직선 이동 조인트다.
 
@@ -512,36 +521,127 @@ ArduinoHardwareInterface::read()
 
 ### ros2_control 핵심 개념
 
-ros2_control은 컨트롤러와 하드웨어 사이의 공통 규격이다.
+3장 마지막에서 터미널로 보낸 조인트 명령은 `trajectory_msgs/msg/JointTrajectory` 형식의 메시지다. 이 메시지 하나에 움직일 조인트와 목표 위치, 이동 시간을 함께 담는다.
 
 ```text
-JointTrajectory
-      │
-      ▼
-joint_trajectory_controller
-      │ position command interface
-      ▼
-hardware interface
-      │
-      ├── Gazebo joint
-      └── Arduino serial
+joint_names
+  명령을 받을 조인트 이름
+
+points.positions
+  각 조인트가 도달할 목표 위치
+
+points.time_from_start
+  그 위치까지 이동할 시간
 ```
 
-컨트롤러는 하드웨어가 Gazebo인지 Arduino인지 알 필요가 없다. 동일한 `position` command interface에 목표값을 쓴다.
+이 메시지를 `/joint_trajectory_controller/joint_trajectory` 토픽에 발행하면 `joint_trajectory_controller`가 받는다.
 
-### 생명주기
+`joint_trajectory_controller`는 `controller_manager` 패키지에서 제공하는 controller 기능 모듈이며, 실행할 때 `ros2_control_node` 안에 불러온다. 이 controller는 메시지에 적힌 목표 시간에 맞춰 중간 위치들을 계산하고, 현재 시점의 목표 위치를 각 조인트의 `position command interface`에 기록한다.
 
-| 함수 | 역할 |
-|---|---|
-| `on_init()` | 파라미터와 인터페이스 검증, 초기 위치와 서보 매핑 준비 |
-| `export_state_interfaces()` | 5개 position 상태 제공 |
-| `export_command_interfaces()` | 5개 position 명령 제공 |
-| `on_activate()` | 시리얼 포트 열기, 현재 상태에서 명령 시작 |
-| `read()` | 마지막 명령을 현재 위치로 보고 |
-| `write()` | 명령을 서보 각도로 변환해 CSV 전송 |
-| `on_deactivate()` | 시리얼 포트 닫기 |
+`position command interface`는 controller가 계산한 위치를 저장하고 하드웨어 쪽에 전달하는 내부 메모리 통로다. 토픽을 하나 더 발행하는 것이 아니라, `ros2_control_node` 안에서 값을 공유한다.
 
-시리얼 포트를 `on_init()`이 아니라 `on_activate()`에서 여는 이유는 하드웨어 생명주기와 실제 장치 연결 시점을 맞추기 위해서다.
+이 값을 하드웨어 쪽에서 읽는 코드가 우리가 작성한 `ArduinoHardwareInterface` C++ 클래스다. 이 클래스도 실행할 때 `ros2_control_node` 안에 불러오며, ros2_control에서는 이처럼 controller와 실제 장치 사이를 연결하는 클래스를 `hardware interface`라고 부른다.
+
+실제 로봇 실행에서는 `ArduinoHardwareInterface::write()`가 command interface의 radian 또는 meter 값을 읽고, 서보 각도로 변환해 CSV를 만든다.
+
+```text
+JointTrajectory 메시지
+  조인트 이름, 목표 위치, 이동 시간을 담아 토픽으로 전송
+      ↓
+joint_trajectory_controller
+  ros2_control_node 안에서 실행되는 controller 기능 모듈
+  시간에 따른 각 조인트의 목표 위치를 계산
+      ↓
+position command interface
+  계산된 위치 명령을 저장하는 내부 메모리 통로
+      ↓
+ArduinoHardwareInterface::write()
+  우리가 작성한 C++ 하드웨어 인터페이스 기능 모듈
+  ROS 위치 명령을 서보 각도로 변환하고 CSV 생성
+      ↓
+Arduino serial
+  CSV 문자열을 실제 Arduino에 전송
+```
+
+Gazebo를 실행할 때는 `ArduinoHardwareInterface` 대신 Gazebo용 하드웨어 인터페이스가 같은 자리에 들어간다. 둘이 동시에 사용되는 것이 아니라, 실제 로봇용 xacro와 시뮬레이션용 xacro 중 무엇을 실행했는지에 따라 하나가 선택된다.
+
+`joint_trajectory_controller`는 어느 구현이 선택되었는지 알 필요가 없다. 두 구현 모두 ros2_control의 공통 규격인 `position command interface`를 제공하기 때문이다.
+
+### ArduinoHardwareInterface가 실행되는 순서
+
+`ArduinoHardwareInterface`가 플러그인으로 불러와지면 `ros2_control_node` 내부의 controller manager가 이 클래스의 함수들을 호출한다. 실행 과정은 처음 한 번 수행하는 준비 단계와 계속 반복하는 제어 단계로 나뉜다.
+
+#### 1. 처음 한 번 수행하는 준비
+
+먼저 `on_init()`이 `robot_description`의 `<ros2_control>` 블록에서 시리얼 포트, 통신 속도, dry-run 설정과 각 조인트의 범위를 읽는다.
+
+이때 조인트 수에 맞춰 두 메모리 배열도 만든다.
+
+```text
+hw_commands_
+  controller가 계산한 위치 명령을 저장
+
+hw_positions_
+  현재 조인트 위치라고 보고할 값을 저장
+```
+
+두 배열은 xacro의 `initial_value`로 초기화된다. 아직 Arduino에 연결하거나 명령을 보내지는 않는다.
+
+다음으로 두 export 함수가 controller와 이 배열을 연결한다.
+
+```text
+export_command_interfaces()
+  각 조인트의 position command interface가
+  hw_commands_[index]를 가리키도록 연결
+
+export_state_interfaces()
+  각 조인트의 position state interface가
+  hw_positions_[index]를 가리키도록 연결
+```
+
+여기서 export는 값을 밖으로 전송한다는 뜻이 아니다. controller가 해당 메모리를 읽거나 쓸 수 있도록 주소를 공개한다는 뜻이다. 이 연결도 시작할 때 한 번 만들며, 제어 주기마다 다시 만드는 것이 아니다.
+
+준비가 끝나면 `on_activate()`가 호출된다. 시작 순간에 갑자기 다른 명령이 나가지 않도록 `hw_commands_`를 현재 `hw_positions_`와 같게 맞춘다. 실제 실행이면 시리얼 포트를 열고, dry-run이면 포트를 열지 않은 채 활성화된다.
+
+#### 2. 활성화된 동안 반복하는 제어
+
+활성화된 뒤에는 controller manager가 기본 100 Hz로 다음 순서를 반복한다.
+
+```text
+ArduinoHardwareInterface::read()
+        ↓
+controller들의 update
+        ↓
+ArduinoHardwareInterface::write()
+```
+
+현재 서보에서는 실제 각도를 돌려받지 못한다. 따라서 `read()`는 이전 주기에 명령했던 값을 현재 위치라고 가정한다.
+
+```cpp
+hw_positions_ = hw_commands_;
+```
+
+이 대입으로 `hw_positions_`가 바뀌면 연결된 position state interface에서도 같은 값이 보인다. `joint_state_broadcaster`는 이 값을 읽어 `/joint_states`를 발행하고, `joint_trajectory_controller`도 현재 상태로 읽을 수 있다.
+
+그 다음 `joint_trajectory_controller`가 이번 주기의 목표 위치를 계산해 position command interface에 기록한다. 이 interface는 `hw_commands_`에 연결되어 있으므로 별도의 복사 함수 없이 배열 값이 바로 바뀐다.
+
+마지막으로 `write()`가 새 `hw_commands_`를 읽는다. 각 ROS 위치를 서보 각도로 변환하고 CSV 한 줄을 만든 뒤 Arduino에 전송한다. dry-run에서는 같은 CSV를 시리얼로 보내지 않고 터미널에 출력한다.
+
+```text
+read()
+  이전 hw_commands_를 hw_positions_에 복사
+
+joint_state_broadcaster
+  hw_positions_를 읽어 /joint_states 발행
+
+joint_trajectory_controller
+  새 목표 위치를 hw_commands_에 기록
+
+write()
+  hw_commands_를 서보 각도와 CSV로 변환해 전송
+```
+
+실행을 종료하거나 하드웨어가 비활성화되면 `on_deactivate()`가 시리얼 포트를 닫는다. dry-run에서는 처음부터 포트를 열지 않았으므로 닫을 포트도 없다.
 
 ### 위치에서 서보 각도로 변환
 
@@ -584,7 +684,7 @@ controller_manager는 100 Hz로 동작하지만 hobby servo와 문자열 시리�
 한 명령은 다음 CSV 한 줄이다.
 
 ```text
-90,90,90,90,0\n
+90,0,180,90,90\n
 ```
 
 Arduino 쪽에서는 줄바꿈을 기준으로 한 프레임을 읽어야 한다.
