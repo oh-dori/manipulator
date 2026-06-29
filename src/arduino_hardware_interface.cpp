@@ -281,7 +281,8 @@ hardware_interface::return_type ArduinoHardwareInterface::write(
     }
     message << command_to_servo_angle(index, hw_commands_[index]);
   }
-  message << '\n';
+  // ROS 2 controller가 이미 계산한 중간 목표값이므로 Arduino에서 즉시 적용합니다.
+  message << ",1\n";
 
   if (dry_run_) {
     const auto command_message = message.str();

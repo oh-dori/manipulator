@@ -86,13 +86,17 @@ RViz Fixed Frame은 `world`다.
 
 ## Gazebo 시뮬레이션
 
+터미널 1:
+
 ```bash
+source ~/ros2_ws/install/setup.bash
 ros2 launch manipulator gazebo.launch.py
 ```
 
-로봇 spawn이 완료된 후 다음 컨트롤러가 시작된다.
+로봇 spawn이 완료된 후 터미널 2에서 컨트롤러 상태를 확인한다.
 
 ```bash
+source ~/ros2_ws/install/setup.bash
 ros2 control list_controllers
 ```
 
@@ -103,9 +107,66 @@ joint_state_broadcaster       active
 joint_trajectory_controller   active
 ```
 
+아래의 [조인트 이동 명령](#조인트-이동-명령)으로 로봇을 움직일 수 있다.
+
+## 실제 Arduino 로봇
+
+### Arduino 없이 디버그
+
+Arduino를 연결하지 않고 하드웨어 인터페이스와 controller 동작을 확인한다.
+
+터미널 1:
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch manipulator real_robot.launch.py dry_run:=true
+```
+
+이 모드에서는 시리얼 포트를 열지 않는다. 조인트 명령을 보내면 Arduino로
+전송할 CSV가 다음 형태로 터미널 1에 출력된다.
+
+```text
+[dry-run] Arduino CSV: 135,90,90,90,60,1
+```
+
+터미널 2에서 컨트롤러 상태를 확인하고
+[조인트 이동 명령](#조인트-이동-명령)을 전송한다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 control list_controllers
+```
+
+### 실제 Arduino 연결
+
+펌웨어의 `Serial.begin(9600)`과 동일하게 baud rate를 `9600`으로 사용한다.
+포트 이름은 연결 환경에 맞게 변경한다.
+
+터미널 1:
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch manipulator real_robot.launch.py \
+  serial_port:=/dev/ttyACM0 \
+  baud_rate:=9600 \
+  write_rate_hz:=20
+```
+
+기본 포트 `/dev/ttyUSB0`을 사용한다면 인자 없이 실행할 수도 있다.
+
+```bash
+ros2 launch manipulator real_robot.launch.py
+```
+
+실행 후 터미널 2에서 [조인트 이동 명령](#조인트-이동-명령)을 전송한다.
+
+## 조인트 이동 명령
+
+Gazebo, 실제 로봇 dry-run, 실제 Arduino에서 동일한 명령을 사용한다.
 명령 대상은 5개다.
 
 ```bash
+source ~/ros2_ws/install/setup.bash
 ros2 topic pub --once \
   /joint_trajectory_controller/joint_trajectory \
   trajectory_msgs/msg/JointTrajectory \
@@ -118,40 +179,40 @@ ros2 topic pub --once \
   }'
 ```
 
-회전 조인트 단위는 rad, 그리퍼 단위는 m다.
+회전 조인트 단위는 rad, 그리퍼 단위는 m다. 위 명령은 모든 조인트가
+2초 후 지정한 위치에 도달하도록 controller에 요청한다.
 
-## 실제 Arduino 로봇
-
-기본 실행:
-
-```bash
-ros2 launch manipulator real_robot.launch.py
-```
-
-포트나 통신 설정이 다르면 launch 인자로 변경한다.
+원위치로 복귀:
 
 ```bash
-ros2 launch manipulator real_robot.launch.py \
-  serial_port:=/dev/ttyACM0 \
-  baud_rate:=115200 \
-  write_rate_hz:=20
+ros2 topic pub --once \
+  /joint_trajectory_controller/joint_trajectory \
+  trajectory_msgs/msg/JointTrajectory \
+  '{
+    joint_names: ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5_left"],
+    points: [{
+      positions: [0.0, 0.0, 0.0, 0.0, 0.008],
+      time_from_start: {sec: 2, nanosec: 0}
+    }]
+  }'
 ```
 
 ### 시리얼 프로토콜
 
-PC는 한 줄에 5개 서보 각도를 CSV로 전송한다.
+PC는 한 줄에 5개 서보 각도와 실행 방식을 CSV로 전송한다.
 
 ```text
-90,90,90,90,0\n
+90,90,90,90,30,1\n
 ```
 
 순서는 다음과 같다.
 
 ```text
-joint_1,joint_2,joint_3,joint_4,joint_5_left
+joint_1,joint_2,joint_3,joint_4,joint_5_left,move_immediately
 ```
 
-Arduino 펌웨어는 줄바꿈까지 한 명령으로 읽어 각 값을 해당 서보에 적용해야 한다.
+`move_immediately`가 `1`이면 각도를 즉시 적용하고, `0`이면 Arduino가 정해진
+시간 동안 목표 각도로 이동한다.
 
 ### 안전 동작
 
