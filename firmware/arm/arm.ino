@@ -1,5 +1,6 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
+#include <stdio.h>
 
 // 기존 펄스 범위: MIN 620us, MAX 2800us
 #define SERVO_MIN_PULSE_US       620   // 서보 모터의 0도에 해당하는 최소 펄스 폭 (마이크로초)
@@ -31,6 +32,7 @@ int target_angles[5] = {90, 0, 180, 90, 90};
 void setup() 
 {
   Serial.begin(9600);
+  Serial.setTimeout(100);
 
   pwm.begin();
   pwm.setOscillatorFrequency(27000000);
@@ -106,47 +108,62 @@ void loop()
 
   // 시리얼 버퍼에 수신된 데이터가 있는지 확인합니다.
   if (Serial.available() > 0) {
+    char command[64];
     int angles[5];
+    int move_immediately;
+    char extra_value;
 
-    // 조인트 각도 5개와 즉시 실행 여부(0 또는 1)를 읽습니다.
-    for (int i = 0; i < 5; i++) {
-      angles[i] = Serial.parseInt();
+    // 개행까지 한 줄을 받은 후 CSV 값 6개를 한 번에 확인합니다.
+    size_t command_length =
+        Serial.readBytesUntil('\n', command, sizeof(command) - 1);
+    command[command_length] = '\0';
+
+    int value_count = sscanf(
+        command,
+        "%d,%d,%d,%d,%d,%d %c",
+        &angles[0],
+        &angles[1],
+        &angles[2],
+        &angles[3],
+        &angles[4],
+        &move_immediately,
+        &extra_value);
+
+    // 잘렸거나 값이 더 들어 있는 명령은 실행하지 않습니다.
+    if (value_count != 6) {
+      return;
     }
-    int move_immediately = Serial.parseInt();
 
-    // 데이터의 끝을 확인하기 위해 개행 문자가 들어올 때까지 기다립니다.
-    if (Serial.read() == '\n') {
-      if (move_immediately != 0 && move_immediately != 1) {
-        Serial.println("Invalid move mode. Use 0 or 1.");
-        return;
-      }
+    if (move_immediately != 0 && move_immediately != 1) {
+      Serial.println("Invalid move mode. Use 0 or 1.");
+      return;
+    }
 
-      // 조인트 1~4는 0~180도, 조인트 5는 30~90도로 제한합니다.
-      for (int i = 0; i < 4; i++) {
-        angles[i] = constrain(angles[i], 0, 180);
-      }
-      angles[4] = constrain(angles[4], 30, 90);
+    // 조인트 1~4는 0~180도, 조인트 5는 30~90도로 제한합니다.
+    for (int i = 0; i < 4; i++) {
+      angles[i] = constrain(angles[i], 0, 180);
+    }
+    angles[4] = constrain(angles[4], 30, 90);
 
-      if (move_immediately == 1) {
-        // ROS 2가 계산한 중간 목표값을 추가 보간 없이 바로 적용합니다.
-        is_moving = false;
-        for (int i = 0; i < 5; i++) {
-          current_angles[i] = angles[i];
-          setServoAngle(servo_channels[i], current_angles[i]);
-        }
-        return;
-      }
-
-      // 단독 제어에서는 현재 위치부터 목표 위치까지 정해진 시간 동안 이동합니다.
+    if (move_immediately == 1) {
+      // ROS 2가 계산한 중간 목표값을 추가 보간 없이 바로 적용합니다.
+      is_moving = false;
       for (int i = 0; i < 5; i++) {
-        start_angles[i] = current_angles[i];
-        target_angles[i] = angles[i];
+        current_angles[i] = angles[i];
+        setServoAngle(servo_channels[i], current_angles[i]);
       }
-      move_start_ms = millis();
-      last_update_ms = move_start_ms;
-      is_moving = true;
-
-      Serial.println("Timed move started.");
+      return;
     }
+
+    // 단독 제어에서는 현재 위치부터 목표 위치까지 정해진 시간 동안 이동합니다.
+    for (int i = 0; i < 5; i++) {
+      start_angles[i] = current_angles[i];
+      target_angles[i] = angles[i];
+    }
+    move_start_ms = millis();
+    last_update_ms = move_start_ms;
+    is_moving = true;
+
+    Serial.println("Timed move started.");
   }
 }
