@@ -34,8 +34,10 @@ RViz, Gazebo, 실제 로봇이 같은 링크와 조인트 이름을 공유한다
 | 3 | [urdf/manipulator_real.urdf.xacro](urdf/manipulator_real.urdf.xacro) + [config/my_controllers.yaml](config/my_controllers.yaml) | 모델에 **실제 로봇 제어 설정**을 붙임 |
 | 4 | [src/arduino_hardware_interface.cpp](src/arduino_hardware_interface.cpp) | 제어 명령을 **실제로 처리**하는 C++ (직접 만든 하드웨어 인터페이스) |
 | 5 | [src/arduino_serial_driver.cpp](src/arduino_serial_driver.cpp) | 아두이노로 **시리얼 전송** |
+| 6 | [urdf/manipulator_sim.urdf.xacro](urdf/manipulator_sim.urdf.xacro) + [launch/gazebo.launch.py](launch/gazebo.launch.py) | 실제 하드웨어를 **Gazebo 물리 시뮬레이션으로 교체** |
+| 7 | `manipulator_moveit_config` (추가 예정) | 목표 자세에서 충돌 없는 조인트 궤적을 계산해 기존 controller로 전달 |
 
-Gazebo 경로([launch/gazebo.launch.py](launch/gazebo.launch.py), [urdf/manipulator_sim.urdf.xacro](urdf/manipulator_sim.urdf.xacro))는 실제 로봇 경로를 이해한 뒤 보면 쉬우므로 곁가지로 뺐다.
+6장에서는 1~5장에서 배운 모델, controller, command/state interface가 Gazebo에서도 어떻게 그대로 이어지는지 비교한다. 7장에서는 그 위에 MoveIt 2를 올려, 조인트 값을 직접 정하던 단계에서 엔드이펙터의 목표 자세와 충돌 회피 경로를 다루는 단계로 넘어간다.
 
 ---
 
@@ -693,27 +695,577 @@ Arduino 쪽에서는 줄바꿈을 기준으로 한 프레임을 읽어야 한다
 
 ---
 
-## 곁가지. Gazebo 경로 — manipulator_sim.urdf.xacro + gazebo.launch.py
+## 6. Gazebo 시뮬레이션 — manipulator_sim.urdf.xacro + gazebo.launch.py
 
-`manipulator_sim.urdf.xacro`는 공통 모델에 다음 두 요소를 더한다.
+### 왜 실제 로봇을 움직인 다음 Gazebo를 배우는가
 
-1. `gazebo_ros2_control/GazeboSystem`
-2. controller YAML을 읽는 `libgazebo_ros2_control.so`
+지금까지 세 가지 단계를 직접 확인했다.
 
-Gazebo 플러그인이 controller_manager를 생성하고 시뮬레이션 조인트를 hardware interface처럼 제공한다.
+```text
+display.launch.py
+  가짜 joint_states로 모델과 TF를 확인
 
-`gazebo.launch.py`의 순서는 다음과 같다.
+real_robot.launch.py dry_run
+  controller 계산과 Arduino용 CSV를 확인
+
+real_robot.launch.py
+  시리얼을 통해 실제 서보까지 명령 전달
+```
+
+이제 Gazebo를 사용하는 이유는 단순히 화면에 로봇을 하나 더 띄우기 위해서가 아니다. 실제 로봇 경로에서 하드웨어 부분만 물리 시뮬레이터로 교체했을 때 같은 ROS 2 controller가 그대로 동작하는지 확인하기 위해서다.
+
+세 실행 환경은 다음처럼 역할이 다르다.
+
+| 환경 | 조인트 상태를 만드는 주체 | 물리 계산 | 주된 확인 대상 |
+|---|---|---|---|
+| RViz + GUI | 사용자가 움직인 슬라이더 | 없음 | 형상, joint 축, TF |
+| 실제 로봇 | 현재는 마지막 명령값을 상태로 가정 | 실제 기구에서 발생 | 시리얼, 서보 방향, 실제 동작 |
+| Gazebo | 물리 엔진이 계산한 조인트 위치 | 있음 | 충돌, 질량, 관성, 중력, 동적 움직임 |
+
+RViz는 전달받은 상태를 그대로 그린다. 목표 위치가 물리적으로 가능한지, 링크끼리 충돌하는지, 중력 때문에 처지는지는 판단하지 않는다. Gazebo는 명령을 받은 뒤 물리 법칙을 적용해 다음 상태를 계산한다.
+
+따라서 이 장의 학습 목표는 다음 세 가지다.
+
+```text
+1. controller와 hardware가 어떻게 분리되는지 확인한다.
+2. 명령 위치와 물리적으로 계산된 실제 위치의 차이를 이해한다.
+3. visual, collision, inertial 정보가 각각 어디에 사용되는지 확인한다.
+```
+
+### 핵심 구조 — controller는 유지하고 hardware만 교체한다
+
+실제 로봇의 제어 흐름은 다음과 같다.
+
+```text
+trajectory_msgs/msg/JointTrajectory 메시지
+  -> joint_trajectory_controller (ros2_control의 controller 모듈)
+  -> position command interface (ros2_control 내부에서 위치 명령을 공유하는 메모리)
+  -> ArduinoHardwareInterface::write() (직접 작성한 C++ hardware interface 클래스의 함수)
+  -> ArduinoSerialDriver (CSV를 USB serial로 전송하는 C++ 통신 클래스)
+  -> Arduino 펌웨어와 서보 (명령을 실행하는 실제 하드웨어)
+```
+
+Gazebo에서는 controller 앞부분을 바꾸지 않는다.
+
+```text
+trajectory_msgs/msg/JointTrajectory 메시지
+  -> joint_trajectory_controller (ros2_control의 controller 모듈)
+  -> position command interface (ros2_control 내부에서 위치 명령을 공유하는 메모리)
+  -> GazeboSystem (Gazebo용 hardware interface 플러그인)
+  -> Gazebo 조인트와 물리 엔진 (명령을 적용하고 상태를 계산하는 시뮬레이션)
+```
+
+`joint_trajectory_controller`는 상대가 실제 Arduino인지 Gazebo인지 알 필요가 없다. 두 hardware implementation이 모두 같은 position command/state interface를 제공하기 때문이다.
+
+이 교체 가능성이 ros2_control을 사용하는 중요한 이유다. 상위 제어 코드는 유지하면서 실제 장치, dry-run 구현, 시뮬레이터를 선택할 수 있다.
+
+### ① manipulator_sim.urdf.xacro — 시뮬레이션용 hardware 설정
+
+시뮬레이션 파일도 실제 로봇 파일처럼 공통 모델부터 가져온다.
+
+```xml
+<xacro:include filename="$(find manipulator)/urdf/manipulator.xacro" />
+```
+
+따라서 RViz, 실제 로봇, Gazebo가 같은 link, joint, mesh와 joint limit을 사용한다. 달라지는 것은 `<ros2_control>`의 hardware plugin이다.
+
+```xml
+<ros2_control name="GazeboSystem" type="system">
+  <hardware>
+    <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+  </hardware>
+  ...
+</ros2_control>
+```
+
+실제 로봇에서는 이 자리에 직접 만든 plugin이 있었다.
+
+```xml
+<plugin>arduino_hardware_interface/ArduinoHardwareInterface</plugin>
+```
+
+두 설정을 비교하면 교체되는 경계를 볼 수 있다.
+
+```text
+실제 로봇: ArduinoHardwareInterface
+Gazebo:    gazebo_ros2_control/GazeboSystem
+```
+
+Gazebo용 각 조인트에도 controller가 사용할 command/state interface가 필요하다.
+
+```xml
+<xacro:ros2_control_joint
+  joint_name="joint_1"
+  min_pos="${-pi/2}"
+  max_pos="${pi/2}"/>
+```
+
+이 매크로는 position command interface와 position state interface를 만든다. 실제 로봇 설정과 조인트 이름 및 ROS 단위 범위가 같으므로 같은 `my_controllers.yaml`을 재사용할 수 있다.
+
+실제 로봇 파일에 있던 `servo_min_angle`, `servo_max_angle`, `serial_port`는 Gazebo 설정에 없다. 시뮬레이션에는 ROS 위치를 서보 각도나 CSV로 변환하는 과정이 필요하지 않기 때문이다.
+
+오른쪽 그리퍼는 독립 명령축이 아니라 왼쪽을 따라가는 조인트다.
+
+```xml
+<joint name="joint_5_right">
+  <param name="mimic">joint_5_left</param>
+  <param name="multiplier">1</param>
+  <state_interface name="position"/>
+</joint>
+```
+
+`joint_trajectory_controller`는 계속 5개 조인트만 명령하고, 오른쪽 그리퍼 상태는 왼쪽 그리퍼의 mimic 관계를 따른다.
+
+### ② libgazebo_ros2_control.so — Gazebo와 ros2_control 연결
+
+파일 아래쪽에는 Gazebo plugin 설정이 있다.
+
+```xml
+<gazebo>
+  <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
+    <parameters>$(find manipulator)/config/my_controllers.yaml</parameters>
+  </plugin>
+</gazebo>
+```
+
+이 plugin은 두 시스템 사이의 연결점이다.
+
+```text
+ros2_control 쪽
+  command interface와 state interface
+
+Gazebo 쪽
+  시뮬레이션 조인트와 물리 엔진
+```
+
+실제 로봇 launch에서는 `ros2_control_node`를 직접 실행했다. Gazebo 경로에서는 `libgazebo_ros2_control.so`가 로봇을 spawn할 때 controller manager를 만든다. 그래서 `gazebo.launch.py`에는 별도의 `ros2_control_node` 실행 코드가 없다.
+
+plugin은 실제 로봇에서 사용한 것과 같은 `my_controllers.yaml`을 읽는다.
+
+```text
+controller_manager update_rate: 100 Hz
+joint_state_broadcaster
+joint_trajectory_controller
+5개의 position 명령축
+```
+
+같은 controller 설정을 재사용한다는 점이 중요하다. 시뮬레이션용 controller를 별도로 만든 것이 아니라 hardware backend만 교체한 것이다.
+
+### ③ gazebo.launch.py — 실행 순서
+
+launch 파일은 먼저 `use_sim_time`을 기본 `true`로 선언한다.
+
+```python
+DeclareLaunchArgument(
+    "use_sim_time",
+    default_value="true",
+)
+```
+
+Gazebo는 실제 벽시계가 아니라 시뮬레이션 시간을 `/clock`으로 제공한다. 시뮬레이션이 일시 정지되거나 느리게 실행되면 ROS 노드의 시간도 그 흐름을 따라야 하므로 `use_sim_time`을 사용한다.
+
+그다음 실행되는 구성은 다음과 같다.
 
 ```text
 Gazebo 시작
 robot_state_publisher 시작
-spawn_entity로 로봇 생성
-spawn 완료
+robot_description 토픽을 사용해 spawn_entity 실행
+로봇이 Gazebo에 spawn됨
+libgazebo_ros2_control.so가 controller manager 생성
 joint_state_broadcaster 시작
 joint_trajectory_controller 시작
 ```
 
-spawn 전에 컨트롤러를 시작하면 `/controller_manager`가 아직 없어 실패하거나 불필요하게 기다릴 수 있으므로 이벤트 순서를 명시했다.
+핵심은 controller를 시작하는 시점이다.
+
+```python
+start_controllers = RegisterEventHandler(
+    event_handler=OnProcessExit(
+        target_action=spawn_entity,
+        on_exit=[
+            joint_state_broadcaster_spawner,
+            joint_trajectory_controller_spawner,
+        ],
+    )
+)
+```
+
+로봇이 spawn되기 전에는 Gazebo plugin과 `/controller_manager`가 아직 준비되지 않았다. 그래서 `spawn_entity`가 끝난 이벤트를 받은 뒤 두 controller를 시작한다.
+
+이 코드를 통해 launch 파일은 단순히 여러 노드를 한꺼번에 실행하는 파일이 아니라, 준비 순서와 의존 관계도 표현한다는 점을 배울 수 있다.
+
+### ④ Gazebo에서 상태가 돌아오는 흐름
+
+실제 로봇의 현재 hardware interface는 위치 센서가 없어서 다음 값을 상태로 보고했다.
+
+```text
+hw_positions_ = hw_commands_
+```
+
+즉 실제 서보가 막혀도 ROS와 RViz에서는 목표 위치에 도달한 것처럼 보이는 open-loop 구조다.
+
+Gazebo에서는 state가 물리 엔진의 계산 결과에서 나온다.
+
+```text
+joint_trajectory_controller
+  -> 이번 제어 주기의 목표 위치 계산
+  -> GazeboSystem의 command interface에 기록
+  -> Gazebo 물리 엔진이 조인트 상태 계산
+  -> GazeboSystem의 state interface 갱신
+  -> joint_state_broadcaster
+  -> /joint_states
+  -> robot_state_publisher
+  -> /tf
+```
+
+이 흐름에서는 command와 state가 개념적으로 분리된다.
+
+```text
+command
+  controller가 도달하라고 요청한 위치
+
+state
+  물리 계산 후 조인트가 실제로 도달한 위치
+```
+
+시뮬레이션 설정과 controller가 이상적이면 둘이 거의 같을 수 있다. 하지만 중력, 충돌, joint limit, 잘못된 관성값 등의 영향이 있으면 차이가 발생할 수 있다.
+
+현재 설정은 effort나 velocity가 아니라 position command interface를 사용한다. 이 방식에서는 GazeboSystem이 목표 위치를 매우 직접적으로 반영할 수 있으므로 실제 서보처럼 가속하고 처지는 현상이 그대로 나타난다고 기대하면 안 된다. 실제 서보의 동역학에 가까운 실험을 하려면 effort 기반 제어, PID, 감쇠, 마찰과 액추에이터 특성을 추가로 모델링해야 한다.
+
+### ⑤ RViz와 Gazebo의 차이 — 운동학에서 동역학으로
+
+RViz에서 조인트 상태를 바꾸면 모델은 즉시 해당 자세로 그려진다. 이것은 주어진 조인트 값으로 링크의 위치를 계산하는 운동학적 표현이다.
+
+Gazebo에서는 다음 URDF 정보가 물리 계산에 사용된다.
+
+```text
+visual
+  사람에게 보이는 모델
+
+collision
+  물체가 서로 닿았는지 계산하는 형상
+
+inertial
+  질량, 무게중심, 관성 텐서
+
+joint limit
+  관절의 위치, 속도, 힘 제한
+```
+
+예를 들어 visual mesh가 정확해도 collision이나 inertial 값이 잘못되면 Gazebo에서 다음 문제가 나타날 수 있다.
+
+- 링크가 떨리거나 튄다.
+- 관절이 목표 위치를 유지하지 못한다.
+- 충돌 판정이 실제 형상과 다르게 보인다.
+- 모델이 지나치게 가볍거나 무겁게 움직인다.
+- 시뮬레이션 계산이 불안정해진다.
+
+현재 공통 모델의 질량과 관성은 작은 근삿값이다. 따라서 지금 단계의 Gazebo 목표는 실제 로봇의 동작을 정밀하게 복제하는 것이 아니다. 먼저 model-controller-hardware 연결이 올바른지 확인하고, 이후 CAD나 측정값을 사용해 물리 파라미터를 보정해야 한다.
+
+### ⑥ 첫 실행과 확인 순서
+
+터미널 1에서 Gazebo를 실행한다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch manipulator gazebo.launch.py
+```
+
+로봇 spawn이 끝난 후 터미널 2에서 controller를 확인한다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 control list_controllers
+```
+
+예상 상태:
+
+```text
+joint_state_broadcaster       active
+joint_trajectory_controller   active
+```
+
+Gazebo가 계산한 조인트 상태를 확인한다.
+
+```bash
+ros2 topic echo /joint_states
+```
+
+다음 trajectory 명령을 전송한다.
+
+```bash
+ros2 topic pub --once \
+  /joint_trajectory_controller/joint_trajectory \
+  trajectory_msgs/msg/JointTrajectory \
+  '{
+    joint_names: ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5_left"],
+    points: [{
+      positions: [0.785, 1.571, -1.571, 0.0, 0.004],
+      time_from_start: {sec: 2, nanosec: 0}
+    }]
+  }'
+```
+
+회전 조인트 단위는 radian이고 그리퍼 단위는 meter다. 실제 로봇에 보낸 것과 같은 ROS 명령이지만, 이번에는 Arduino용 각도로 변환되지 않고 GazeboSystem으로 전달된다.
+
+### Gazebo가 대신 검증할 수 없는 것
+
+Gazebo가 움직인다고 실제 로봇도 반드시 같은 방식으로 움직이는 것은 아니다. 현재 시뮬레이션은 다음 현실 요소를 정확하게 재현하지 않는다.
+
+- 서보의 실제 토크와 속도
+- 기어 백래시와 마찰
+- 링크 조립 오차
+- 전원 부족과 전압 강하
+- USB 시리얼 지연과 데이터 손실
+- Arduino 펌웨어의 버퍼와 명령 처리
+- 현재 position interface로 생략된 서보의 PID와 동특성
+
+따라서 Gazebo는 실제 로봇을 없애는 도구가 아니라, 모델과 controller를 실제 하드웨어보다 안전하고 반복 가능한 조건에서 검증하는 도구다.
+
+---
+
+## 7. MoveIt 2 적용 — 목표 자세에서 조인트 궤적 만들기
+
+### 왜 지금 MoveIt 2를 배우는가
+
+6장까지는 사람이 모든 조인트의 목표값을 직접 정해 `JointTrajectory` 메시지를 보냈다.
+
+```text
+사람이 joint_1 ~ joint_5_left의 목표값 결정
+  -> joint_trajectory_controller
+  -> Gazebo 또는 실제 로봇
+```
+
+이 방식은 제어 경로를 검증하기에는 좋지만, 실제 작업을 지시하기에는 불편하다. 예를 들어 "그리퍼를 물체 앞의 특정 위치와 방향으로 이동하라"는 명령을 수행하려면 다음 계산이 더 필요하다.
+
+```text
+목표 위치와 방향을 만족하는 조인트 값은 무엇인가?          역기구학(IK)
+현재 자세에서 목표 자세까지 어떤 경로로 움직여야 하는가?     경로 계획
+그 경로에서 로봇 자신이나 주변 물체와 부딪히지 않는가?       충돌 검사
+계산한 경로를 controller가 실행할 수 있는 궤적으로 만들 수 있는가?
+```
+
+MoveIt 2가 이 계산을 담당한다. 지금까지 만든 URDF, TF, `/joint_states`, `joint_trajectory_controller`를 버리고 새로운 제어 시스템으로 바꾸는 것이 아니다. 그 위에 경로를 계획하는 상위 계층을 추가한다.
+
+```text
+목표 자세(Pose) 또는 목표 조인트 값
+  -> MoveIt 2
+     - 현재 상태 확인
+     - IK 계산
+     - 충돌 검사
+     - 경로 계획
+  -> JointTrajectory
+  -> 기존 joint_trajectory_controller
+  -> 기존 ros2_control command interface
+  -> GazeboSystem 또는 ArduinoHardwareInterface
+```
+
+따라서 MoveIt 아래쪽의 실행 대상만 바꾸면 같은 계획 구조를 시뮬레이션과 실제 로봇에서 재사용할 수 있다.
+
+### RViz, MoveIt, Gazebo의 역할
+
+MoveIt 실습에서 RViz와 Gazebo에 같은 로봇이 보이지만 두 프로그램이 같은 일을 하는 것은 아니다.
+
+| 구성 | 역할 | 하지 않는 일 |
+|---|---|---|
+| RViz MotionPlanning 패널 | 목표 자세 입력, 계획 경로 미리보기, MoveIt Planning Scene 확인 | 중력·접촉 같은 물리 계산 |
+| MoveIt `move_group` | 현재 상태를 읽고 IK·충돌 검사·경로 계획 수행 | 모터나 Gazebo 조인트를 직접 구동 |
+| Gazebo | 전달받은 궤적을 물리 환경에서 실행 | 목표 자세까지의 충돌 회피 경로 계획 |
+| ros2_control | 궤적을 각 제어 주기의 조인트 명령으로 실행 | 작업 공간의 목표 자세 결정 |
+
+RViz는 단순 모델 뷰어가 아니라 ROS와 MoveIt 내부 상태를 들여다보는 계기판이다. RViz의 인터랙티브 마커로 목표 자세를 지정해도 Gazebo 로봇이 즉시 움직이지 않는다. 먼저 계획 결과를 확인하고 `Execute`해야 궤적이 controller로 전달된다.
+
+RViz는 목표를 넣는 여러 방법 중 하나일 뿐이다. 연결을 검증한 뒤에는 Python/C++ 노드, 카메라 인식 결과 또는 작업 명령이 MoveIt에 목표를 전달할 수 있으므로 RViz 없이도 실행할 수 있다.
+
+### MoveIt이 사용하는 두 가지 로봇 설명
+
+MoveIt은 기존 URDF와 함께 SRDF(Semantic Robot Description Format)를 사용한다.
+
+```text
+URDF
+  link와 joint의 물리적 구조
+  joint 축과 limit
+  visual과 collision 형상
+
+SRDF
+  어떤 joint들을 하나의 planning group으로 볼지
+  end effector가 어느 group과 link에 연결되는지
+  기본 자세 이름
+  항상 맞닿아 있어 충돌 검사에서 제외할 link 쌍
+```
+
+즉 URDF가 로봇의 몸을 설명한다면 SRDF는 MoveIt이 그 몸을 어떤 단위로 계획할지 설명한다.
+
+이 매니퓰레이터의 첫 설정은 다음처럼 나눈다.
+
+```text
+arm planning group
+  joint_1
+  joint_2
+  joint_3
+  joint_4
+
+gripper planning group
+  joint_5_left
+  joint_5_right는 mimic joint이므로 독립 명령축으로 취급하지 않음
+```
+
+첫 실습에서는 팔의 목표 link를 `link_5`로 사용한다. `link_5`는 손목 끝이자 그리퍼 부모 link다. 나중에 집기 위치를 더 명확하게 표현하려면 두 손가락 사이의 중심에 `tool0` 또는 `tcp_link`라는 고정 link를 추가하고 그 link를 목표로 삼는 편이 좋다.
+
+### manipulator_moveit_config가 담을 설정
+
+MoveIt Setup Assistant로 별도 패키지인 `manipulator_moveit_config`를 만든다. 형상 원본은 계속 `manipulator` 패키지의 URDF를 사용하고, 새 패키지는 MoveIt 전용 의미와 실행 설정을 담는다.
+
+주요 파일의 역할은 다음과 같다.
+
+```text
+config/manipulator.srdf
+  arm/gripper group, 기본 자세, end effector, 충돌 제외 관계
+
+config/kinematics.yaml
+  arm group이 사용할 IK solver와 탐색 설정
+
+config/joint_limits.yaml
+  MoveIt에서 사용할 속도·가속도 제한
+
+config/ompl_planning.yaml
+  OMPL 경로 planner 설정
+
+config/moveit_controllers.yaml
+  MoveIt이 계획 결과를 어느 ros2_control controller로 보낼지 연결
+
+launch/move_group.launch.py
+  경로 계획의 중심 노드인 move_group 실행
+
+launch/moveit_rviz.launch.py
+  MotionPlanning 패널이 포함된 RViz 실행
+```
+
+가장 중요한 controller 연결은 기존 이름을 그대로 사용한다.
+
+```text
+MoveIt controller 이름
+  joint_trajectory_controller
+
+FollowJointTrajectory action
+  /joint_trajectory_controller/follow_joint_trajectory
+
+명령 joint
+  joint_1, joint_2, joint_3, joint_4, joint_5_left
+```
+
+MoveIt은 이 action으로 계획된 trajectory를 보내고, 기존 `joint_trajectory_controller`가 이를 실행한다. 새로운 저수준 controller를 만드는 단계가 아니다.
+
+### 적용 순서
+
+#### 1단계 — 설치와 모델 사전 점검
+
+- ROS 2 배포판과 맞는 MoveIt 2 및 Setup Assistant를 설치한다.
+- xacro가 오류 없이 URDF로 변환되는지 확인한다.
+- joint limit, joint 이름, `world`에서 `link_5`까지의 kinematic chain을 확인한다.
+- 기존 `joint_trajectory_controller`의 FollowJointTrajectory action이 활성화되는지 확인한다.
+
+#### 2단계 — MoveIt 설정 패키지 생성
+
+- Setup Assistant에 `manipulator.xacro`를 불러온다.
+- self-collision matrix를 생성한다.
+- `arm`과 `gripper` planning group을 만든다.
+- `link_5`를 기준으로 end effector 설정을 만든다.
+- 초기 자세를 named state로 등록한다.
+- `manipulator_moveit_config` 패키지를 생성한다.
+
+이 단계에서는 아직 Gazebo 물리를 검증하려는 것이 아니라, MoveIt이 로봇의 관절 구조와 충돌 형상을 올바르게 읽는지 확인한다.
+
+#### 3단계 — MoveIt 단독 계획 확인
+
+RViz MotionPlanning 패널에서 다음을 확인한다.
+
+```text
+Planning Group에서 arm을 선택할 수 있는가?
+link_5에 목표 자세 마커가 나타나는가?
+Plan을 누르면 충돌 없는 궤적 미리보기가 나타나는가?
+현재 자세와 목표 자세가 joint limit 안에 있는가?
+```
+
+`Plan`은 계산과 미리보기만 하며 controller로 명령을 보내지 않는다. 이 구분을 먼저 확인해야 계획 문제와 실행 문제를 분리해서 디버깅할 수 있다.
+
+#### 4단계 — Gazebo 실행과 연결
+
+Gazebo가 로봇, `/joint_states`, controller manager를 제공하고 MoveIt은 계획 노드와 RViz만 제공하도록 구성한다.
+
+```text
+gazebo.launch.py
+  -> Gazebo 로봇
+  -> joint_state_broadcaster
+  -> joint_trajectory_controller
+  -> /joint_states
+
+MoveIt launch
+  -> move_group
+  -> RViz MotionPlanning
+  -> 기존 joint_trajectory_controller의 action 사용
+```
+
+MoveIt의 demo launch가 fake hardware나 별도의 controller manager를 함께 시작한다면 Gazebo와 중복될 수 있다. 따라서 Gazebo 연동 launch에서는 `move_group`과 MoveIt RViz만 실행하고, 로봇 상태와 controller는 기존 Gazebo 경로의 것을 사용한다.
+
+첫 통합 목표는 다음과 같다.
+
+```text
+1. RViz에서 link_5의 도달 가능한 목표 자세를 지정한다.
+2. Plan으로 예상 경로를 확인한다.
+3. Execute를 누른다.
+4. MoveIt이 FollowJointTrajectory action으로 궤적을 보낸다.
+5. Gazebo의 로봇이 계획된 경로를 따라 움직인다.
+6. /joint_states가 다시 MoveIt의 현재 상태로 반영된다.
+```
+
+#### 5단계 — Planning Scene과 장애물
+
+Gazebo 화면에 책상이나 상자가 보인다고 MoveIt이 자동으로 그것을 장애물로 아는 것은 아니다. Gazebo의 물리 world와 MoveIt의 Planning Scene은 별개의 세계 표현이다.
+
+```text
+Gazebo world
+  물리 엔진이 충돌과 접촉을 계산하는 환경
+
+MoveIt Planning Scene
+  경로 계획 중 충돌을 검사하는 환경
+```
+
+따라서 장애물 회피 실습에서는 같은 물체를 MoveIt Planning Scene에 collision object로 추가해야 한다. RViz에서는 Gazebo 화면이 아니라 MoveIt이 실제로 알고 있는 충돌 환경을 확인한다.
+
+#### 6단계 — 코드로 목표 전달
+
+RViz 검증이 끝나면 Python 또는 C++ 노드에서 다음 목표를 전달한다.
+
+- 미리 정한 named pose
+- 조인트 목표값
+- `link_5`의 위치와 방향
+- 여러 waypoint를 잇는 Cartesian path
+
+이때부터 RViz는 필수 실행 요소가 아니라 필요할 때 켜는 디버깅 도구가 된다.
+
+#### 7단계 — 실제 로봇으로 교체
+
+Gazebo 연결이 검증되면 아래쪽 실행 대상을 `real_robot.launch.py`로 바꾼다.
+
+```text
+MoveIt 계획 계층은 유지
+GazeboSystem 대신 ArduinoHardwareInterface 사용
+같은 joint_trajectory_controller action 사용
+```
+
+실제 로봇에서는 현재 엔코더 피드백이 없어 명령 위치를 현재 위치로 간주한다. 따라서 MoveIt 화면에서 정상으로 보여도 로봇이 물리적으로 막혔는지는 알 수 없다. 처음에는 낮은 속도와 좁은 작업 범위에서 시험하고, 비상 정지와 전원 차단 수단을 준비해야 한다.
+
+### 단계별 성공 기준
+
+| 단계 | 성공 기준 |
+|---|---|
+| 설정 생성 | Setup Assistant에서 모델과 planning group을 오류 없이 읽음 |
+| 계획 | RViz에서 `arm` 목표에 대해 Plan이 성공하고 궤적이 보임 |
+| 시뮬레이션 실행 | Execute 후 Gazebo 로봇이 움직이고 controller action이 성공함 |
+| 장애물 회피 | Planning Scene 장애물을 포함한 경로가 충돌 없이 생성됨 |
+| 코드 제어 | RViz 목표 마커 없이 노드가 pose goal을 보내 실행함 |
+| 실제 로봇 | 제한된 속도에서 계획 궤적을 실제 서보가 안전하게 실행함 |
 
 ---
 
@@ -745,7 +1297,7 @@ controller에서 잘못된 값이 들어와도 hardware interface가 URDF 범위
 
 - CAD 또는 측정을 기반으로 질량과 관성 텐서 보정
 - 실제 서보별 각도 한계와 중립 위치 캘리브레이션
-- Arduino 펌웨어의 CSV 파서와 watchdog 구현
+- Arduino 펌웨어의 수신 버퍼 오버플로 정책 보강과 watchdog 구현
 - 통신 단절 시 서보 정지/토크 해제 정책
 - 엔코더를 사용할 경우 closed-loop state feedback 추가
 - 장기적으로 Gazebo Classic에서 modern Gazebo로 전환

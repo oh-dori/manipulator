@@ -31,6 +31,11 @@
 
   <export>
     <build_type>ament_cmake</build_type>
-    <gazebo_ros gazebo_model_path="${prefix}"/>
+    <!--
+      Gazebo converts package://manipulator/... mesh URIs to
+      model://manipulator/....  Register the parent of this package's share
+      directory so the leading "manipulator" component resolves correctly.
+    -->
+    <gazebo_ros gazebo_model_path="${prefix}/.."/>
   </export>
 </package>
