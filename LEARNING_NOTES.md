@@ -1062,7 +1062,69 @@ MoveIt 2가 이 계산을 담당한다. 지금까지 만든 URDF, TF, `/joint_st
 
 따라서 MoveIt 아래쪽의 실행 대상만 바꾸면 같은 계획 구조를 시뮬레이션과 실제 로봇에서 재사용할 수 있다.
 
-### RViz, MoveIt, Gazebo의 역할
+### 기존 패키지와 새 MoveIt 패키지의 관계
+
+MoveIt 설정은 기존 `manipulator` 패키지에 모두 넣지 않고 `manipulator_moveit_config`라는 별도 ROS 2 패키지로 만든다.
+
+두 패키지는 다음처럼 역할을 나눈다.
+
+```text
+manipulator
+  로봇 자체를 설명하고 움직이는 패키지
+  - URDF/Xacro와 mesh
+  - ros2_control 설정
+  - Gazebo 실행
+  - 실제 Arduino hardware interface
+
+manipulator_moveit_config
+  그 로봇의 경로 계획 방법을 설명하는 패키지
+  - planning group
+  - IK solver
+  - 충돌 검사 설정
+  - 경로 planner
+  - 계획 결과를 전달할 controller 정보
+  - move_group과 MoveIt용 RViz 실행
+```
+
+워크스페이스에 두 패키지가 함께 놓이는 전체 구조는 다음과 같다. Setup Assistant 버전에 따라 생성되는 launch 파일의 세부 이름은 달라질 수 있으므로 아래는 생성 전 예상 구조다. 실제 생성 후에는 만들어진 파일을 기준으로 이 목록을 갱신한다.
+
+```text
+ros2_ws/src/
+├── manipulator/
+│   ├── urdf/
+│   │   ├── manipulator.xacro
+│   │   ├── manipulator_sim.urdf.xacro
+│   │   └── manipulator_real.urdf.xacro
+│   ├── meshes/
+│   ├── config/
+│   │   └── my_controllers.yaml
+│   ├── launch/
+│   │   ├── gazebo.launch.py
+│   │   └── real_robot.launch.py
+│   └── src/
+│       └── Arduino hardware interface와 serial driver
+│
+└── manipulator_moveit_config/
+    ├── package.xml
+    ├── CMakeLists.txt
+    ├── .setup_assistant
+    ├── config/
+    │   ├── manipulator.srdf
+    │   ├── kinematics.yaml
+    │   ├── joint_limits.yaml
+    │   ├── ompl_planning.yaml
+    │   ├── moveit_controllers.yaml
+    │   └── moveit.rviz
+    └── launch/
+        ├── demo.launch.py
+        ├── move_group.launch.py
+        ├── moveit_rviz.launch.py
+        └── gazebo_moveit.launch.py
+```
+
+`manipulator_moveit_config`가 별도 패키지여도 로봇 모델을 새로 만드는 것은 아니다. 형상과 조인트의 원본은 계속 `manipulator` 패키지에 두고, MoveIt 패키지가 그 모델을 불러와 계획에 필요한 의미와 설정을 덧붙인다.
+
+### 전체 실행 구조와 각 구성의 역할
 
 MoveIt 실습에서 RViz와 Gazebo에 같은 로봇이 보이지만 두 프로그램이 같은 일을 하는 것은 아니다.
 
@@ -1073,11 +1135,21 @@ MoveIt 실습에서 RViz와 Gazebo에 같은 로봇이 보이지만 두 프로�
 | Gazebo | 전달받은 궤적을 물리 환경에서 실행 | 목표 자세까지의 충돌 회피 경로 계획 |
 | ros2_control | 궤적을 각 제어 주기의 조인트 명령으로 실행 | 작업 공간의 목표 자세 결정 |
 
-RViz는 단순 모델 뷰어가 아니라 ROS와 MoveIt 내부 상태를 들여다보는 계기판이다. RViz의 인터랙티브 마커로 목표 자세를 지정해도 Gazebo 로봇이 즉시 움직이지 않는다. 먼저 계획 결과를 확인하고 `Execute`해야 궤적이 controller로 전달된다.
+RViz는 단순 모델 뷰어가 아니라 ROS와 MoveIt 내부 상태를 들여다보는 계기판이다. RViz의 인터랙티브 마커로 목표 자세를 지정해도 Gazebo 로봇이 즉시 움직이지 않는다. 먼저 MoveIt이 경로를 계획하고, RViz에서 계획 결과를 확인한 다음 `Execute`해야 궤적이 ros2_control controller로 전달된다.
+
+```text
+RViz에서 목표 자세 입력
+  -> move_group이 현재 /joint_states 확인
+  -> IK와 충돌 없는 경로 계산
+  -> RViz에서 계획 경로 미리보기
+  -> Execute
+  -> joint_trajectory_controller
+  -> Gazebo 또는 실제 로봇
+```
 
 RViz는 목표를 넣는 여러 방법 중 하나일 뿐이다. 연결을 검증한 뒤에는 Python/C++ 노드, 카메라 인식 결과 또는 작업 명령이 MoveIt에 목표를 전달할 수 있으므로 RViz 없이도 실행할 수 있다.
 
-### MoveIt이 사용하는 두 가지 로봇 설명
+### MoveIt이 사용하는 URDF와 SRDF
 
 MoveIt은 기존 URDF와 함께 SRDF(Semantic Robot Description Format)를 사용한다.
 
@@ -1112,13 +1184,255 @@ gripper planning group
 
 첫 실습에서는 팔의 목표 link를 `link_5`로 사용한다. `link_5`는 손목 끝이자 그리퍼 부모 link다. 나중에 집기 위치를 더 명확하게 표현하려면 두 손가락 사이의 중심에 `tool0` 또는 `tcp_link`라는 고정 link를 추가하고 그 link를 목표로 삼는 편이 좋다.
 
-### manipulator_moveit_config가 담을 설정
+### 기존 my_controllers.yaml은 무엇을 만들고 있는가
 
-MoveIt Setup Assistant로 별도 패키지인 `manipulator_moveit_config`를 만든다. 형상 원본은 계속 `manipulator` 패키지의 URDF를 사용하고, 새 패키지는 MoveIt 전용 의미와 실행 설정을 담는다.
+MoveIt과 controller를 연결하기 전에 현재 사용 중인 `manipulator/config/my_controllers.yaml`의 역할을 다시 확인한다.
 
-주요 파일의 역할은 다음과 같다.
+```yaml
+controller_manager:
+  ros__parameters:
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - joint_1
+      - joint_2
+      - joint_3
+      - joint_4
+      - joint_5_left
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+```
+
+여기서 이름과 종류를 구분해야 한다.
 
 ```text
+joint_trajectory_controller
+  이 프로젝트에서 controller에 붙인 이름
+
+joint_trajectory_controller/JointTrajectoryController
+  ros2_control이 불러오는 controller plugin의 종류
+```
+
+이 YAML은 controller manager가 읽는다. 그 결과 `joint_trajectory_controller`라는 실제 controller가 생성되고, 이 controller가 다섯 조인트의 position command interface를 사용한다.
+
+```text
+my_controllers.yaml
+  -> controller manager가 읽음
+  -> joint_trajectory_controller plugin 생성
+  -> joint_1 ~ joint_5_left의 command interface 사용
+```
+
+### 지금까지 사용한 토픽과 controller가 제공하는 action
+
+6장에서는 다음 토픽으로 `JointTrajectory` 메시지를 직접 보냈다.
+
+```text
+/joint_trajectory_controller/joint_trajectory
+```
+
+전체 이름은 아래 두 부분으로 만들어진다.
+
+```text
+controller 이름
+  joint_trajectory_controller
+
+controller가 제공하는 토픽 이름
+  joint_trajectory
+
+결과
+  /joint_trajectory_controller/joint_trajectory
+```
+
+이 토픽 방식은 명령을 한 번 보내는 데는 간단하지만, 명령을 보낸 쪽이 실행 과정과 성공·실패 결과를 받기 어렵다. 실행 결과를 돌려주는 별도의 응답 통로가 없기 때문이다.
+
+`JointTrajectoryController`는 토픽 외에도 다음 action server를 기본으로 제공한다.
+
+```text
+/joint_trajectory_controller/follow_joint_trajectory
+```
+
+이 이름도 같은 방법으로 만들어진다.
+
+```text
+controller 이름
+  joint_trajectory_controller
+
+action namespace
+  follow_joint_trajectory
+
+결과
+  /joint_trajectory_controller/follow_joint_trajectory
+```
+
+`FollowJointTrajectory`는 새로운 controller의 이름이 아니다. `control_msgs/action/FollowJointTrajectory`라는 action 통신 형식이다. 내부 목표에는 지금까지 사용한 것과 같은 `trajectory_msgs/msg/JointTrajectory`가 들어가지만, action에는 다음 기능이 추가된다.
+
+```text
+goal
+  실행할 trajectory 전달
+
+feedback
+  trajectory 실행 중 상태 전달
+
+result
+  목표 도달, 실패 또는 취소 결과 전달
+
+cancel
+  실행 중인 목표 취소
+```
+
+두 명령 방식을 비교하면 다음과 같다.
+
+```text
+지금까지의 직접 명령
+  ros2 topic pub
+    -> /joint_trajectory_controller/joint_trajectory
+    -> trajectory 실행
+    -> 명령을 보낸 쪽에서 최종 결과를 직접 받지 않음
+
+MoveIt의 실행
+  move_group의 action client
+    -> /joint_trajectory_controller/follow_joint_trajectory
+    -> 같은 controller가 trajectory 실행
+    -> feedback과 최종 결과를 move_group이 받음
+```
+
+MoveIt은 계획한 경로가 실제로 끝났는지 감시해야 하므로 action 방식을 사용한다. 새로운 ros2_control controller를 만드는 것이 아니라, 이미 사용 중인 `joint_trajectory_controller`가 제공하는 다른 명령 통로를 사용하는 것이다.
+
+실행 중인 action은 다음 명령으로 확인할 수 있다.
+
+```bash
+ros2 action list
+ros2 action info /joint_trajectory_controller/follow_joint_trajectory
+```
+
+### my_controllers.yaml과 moveit_controllers.yaml의 차이
+
+이제 새 MoveIt 패키지의 `config/moveit_controllers.yaml`이 필요한 이유를 볼 수 있다.
+
+| 파일 | 읽는 주체 | 역할 |
+|---|---|---|
+| `manipulator/config/my_controllers.yaml` | ros2_control의 controller manager | controller plugin을 실제로 생성하고 사용할 joint와 command/state interface를 정함 |
+| `manipulator_moveit_config/config/moveit_controllers.yaml` | MoveIt의 `move_group` | 이미 실행 중인 controller의 action 주소와 담당 joint를 알려줌 |
+
+두 파일은 같은 controller를 서로 다른 쪽에서 설명하므로 내용이 다르다. `moveit_controllers.yaml`이 controller를 새로 생성하거나 hardware interface에 연결하는 것은 아니다.
+
+이 프로젝트에서 사용할 MoveIt 쪽 설정은 다음 형태가 된다.
+
+```yaml
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - joint_trajectory_controller
+
+  joint_trajectory_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - joint_1
+      - joint_2
+      - joint_3
+      - joint_4
+      - joint_5_left
+```
+
+각 항목은 다음을 의미한다.
+
+```text
+controller_names
+  MoveIt이 사용할 수 있는 controller 이름 목록
+
+joint_trajectory_controller
+  my_controllers.yaml에서 실제로 생성한 controller와 맞출 이름
+
+action_ns: follow_joint_trajectory
+  controller가 제공하는 action namespace
+
+type: FollowJointTrajectory
+  MoveIt이 사용할 action 통신 형식
+
+joints
+  이 controller가 명령할 수 있는 joint 목록
+```
+
+따라서 MoveIt이 최종적으로 찾아가는 action 주소는 두 값을 합친 결과다.
+
+```text
+controller 이름 + action namespace
+
+joint_trajectory_controller + follow_joint_trajectory
+  -> /joint_trajectory_controller/follow_joint_trajectory
+```
+
+여기서 “기존 controller 이름을 재사용한다”는 말은 `my_controllers.yaml` 전체를 복사한다는 뜻이 아니다. 두 파일에 적힌 `joint_trajectory_controller`라는 이름을 맞춰, MoveIt이 이미 실행 중인 controller의 action server를 찾아가게 한다는 뜻이다.
+
+### arm 그룹과 기존 controller의 joint 수 문제
+
+MoveIt의 첫 planning group은 다음 네 조인트로 구성한다.
+
+```text
+arm
+  joint_1
+  joint_2
+  joint_3
+  joint_4
+```
+
+하지만 현재 `joint_trajectory_controller`는 그리퍼까지 포함한 다섯 조인트를 제어한다.
+
+```text
+joint_trajectory_controller
+  joint_1
+  joint_2
+  joint_3
+  joint_4
+  joint_5_left
+```
+
+기본 설정의 `JointTrajectoryController`는 controller에 등록된 모든 joint가 trajectory에 들어오기를 요구한다. 따라서 MoveIt이 `arm` 그룹의 네 조인트만 계획해 보내면 그대로는 거부될 수 있다.
+
+첫 실습에서는 controller를 팔과 그리퍼로 나누지 않고, 기존 controller 하나를 유지하면서 다음 옵션을 `my_controllers.yaml`에 추가한다.
+
+```yaml
+joint_trajectory_controller:
+  ros__parameters:
+    allow_partial_joints_goal: true
+```
+
+이 설정은 일부 joint만 담긴 action goal도 허용한다.
+
+```text
+arm 계획 실행
+  joint_1 ~ joint_4만 전달
+  joint_5_left는 현재 위치 유지
+
+gripper 계획 실행
+  joint_5_left만 전달
+  joint_1 ~ joint_4는 현재 위치 유지
+```
+
+이 방식은 현재 controller 구조를 최소한으로 변경해 MoveIt 연결을 배우기 위한 선택이다. 이후 팔과 그리퍼를 독립적으로 운용할 필요가 커지면 `arm_trajectory_controller`와 gripper용 controller를 분리하는 구조를 다시 검토할 수 있다.
+
+### manipulator_moveit_config의 주요 설정 파일
+
+MoveIt Setup Assistant로 생성할 `manipulator_moveit_config`의 주요 파일은 다음 역할을 맡는다.
+
+```text
+package.xml
+  MoveIt 실행에 필요한 ROS 2 패키지 의존성 선언
+
+CMakeLists.txt
+  config와 launch 디렉터리를 install 공간에 복사
+
+.setup_assistant
+  Setup Assistant가 설정 패키지를 다시 열 때 사용하는 작업 정보
+
 config/manipulator.srdf
   arm/gripper group, 기본 자세, end effector, 충돌 제외 관계
 
@@ -1132,29 +1446,23 @@ config/ompl_planning.yaml
   OMPL 경로 planner 설정
 
 config/moveit_controllers.yaml
-  MoveIt이 계획 결과를 어느 ros2_control controller로 보낼지 연결
+  move_group이 기존 controller action을 찾아가기 위한 정보
+
+config/moveit.rviz
+  MotionPlanning 패널과 MoveIt 시각화 설정
 
 launch/move_group.launch.py
   경로 계획의 중심 노드인 move_group 실행
 
 launch/moveit_rviz.launch.py
   MotionPlanning 패널이 포함된 RViz 실행
+
+launch/demo.launch.py
+  MoveIt 설정을 단독으로 확인하기 위한 구성 요소들을 묶어 실행
+
+launch/gazebo_moveit.launch.py
+  기존 Gazebo 실행과 move_group, MoveIt RViz를 함께 연결하기 위해 추가할 launch
 ```
-
-가장 중요한 controller 연결은 기존 이름을 그대로 사용한다.
-
-```text
-MoveIt controller 이름
-  joint_trajectory_controller
-
-FollowJointTrajectory action
-  /joint_trajectory_controller/follow_joint_trajectory
-
-명령 joint
-  joint_1, joint_2, joint_3, joint_4, joint_5_left
-```
-
-MoveIt은 이 action으로 계획된 trajectory를 보내고, 기존 `joint_trajectory_controller`가 이를 실행한다. 새로운 저수준 controller를 만드는 단계가 아니다.
 
 ### 적용 순서
 
