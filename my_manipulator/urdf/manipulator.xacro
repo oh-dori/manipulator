@@ -32,13 +32,13 @@
     <link name="${link_name}">
       <visual>
         <geometry>
-          <mesh filename="package://manipulator/meshes/${link_name}.stl" scale="${mesh_scale}"/>
+          <mesh filename="package://my_manipulator/meshes/${link_name}.stl" scale="${mesh_scale}"/>
         </geometry>
         <material name="${gazebo_material}"/>
       </visual>
       <collision>
         <geometry>
-          <mesh filename="package://manipulator/meshes/${link_name}.stl" scale="${mesh_scale}"/>
+          <mesh filename="package://my_manipulator/meshes/${link_name}.stl" scale="${mesh_scale}"/>
         </geometry>
       </collision>
       <inertial>

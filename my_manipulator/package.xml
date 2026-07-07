@@ -1,7 +1,6 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>manipulator</name>
+  <name>my_manipulator</name>
   <version>0.1.0</version>
   <description>Small six-joint manipulator model with RViz, Gazebo Classic, and Arduino ros2_control backends.</description>
   <maintainer email="oh@todo.todo">oh</maintainer>
@@ -32,9 +31,9 @@
   <export>
     <build_type>ament_cmake</build_type>
     <!--
-      Gazebo converts package://manipulator/... mesh URIs to
-      model://manipulator/....  Register the parent of this package's share
-      directory so the leading "manipulator" component resolves correctly.
+      Gazebo converts package://my_manipulator/... mesh URIs to
+      model://my_manipulator/....  Register the parent of this package's share
+      directory so the leading "my_manipulator" component resolves correctly.
     -->
     <gazebo_ros gazebo_model_path="${prefix}/.."/>
   </export>

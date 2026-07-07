@@ -1,6 +1,6 @@
 # ROS 2 매니퓰레이터 학습 노트
 
-이 노트는 `manipulator` 패키지를 처음 공부하는 사람을 위해, 파일을 하나씩 순서대로 따라가며 URDF, TF, ros2_control, Gazebo, 하드웨어 인터페이스가 어떻게 연결되는지 설명한다.
+이 노트는 `manipulator` 리포지토리 안의 `my_manipulator` 패키지를 처음 공부하는 사람을 위해, 파일을 하나씩 순서대로 따라가며 URDF, TF, ros2_control, Gazebo, 하드웨어 인터페이스가 어떻게 연결되는지 설명한다. MoveIt 2 설정은 같은 리포의 별도 패키지 `my_manipulator_moveit`에서 관리한다.
 
 ## 들어가기 — 이 패키지가 하는 일과 학습 순서
 
@@ -29,13 +29,13 @@ RViz, Gazebo, 실제 로봇이 같은 링크와 조인트 이름을 공유한다
 
 | 순서 | 파일 | 역할 |
 |---|---|---|
-| 1 | [urdf/manipulator.xacro](urdf/manipulator.xacro) | 로봇이 **어떻게 생겼나** (링크·조인트·메쉬) — 모든 것의 기반 |
-| 2 | [launch/display.launch.py](launch/display.launch.py) | 그 모델을 **RViz로 띄우는** 가장 단순한 실행 |
-| 3 | [urdf/manipulator_real.urdf.xacro](urdf/manipulator_real.urdf.xacro) + [config/my_controllers.yaml](config/my_controllers.yaml) | 모델에 **실제 로봇 제어 설정**을 붙임 |
-| 4 | [src/arduino_hardware_interface.cpp](src/arduino_hardware_interface.cpp) | 제어 명령을 **실제로 처리**하는 C++ (직접 만든 하드웨어 인터페이스) |
-| 5 | [src/arduino_serial_driver.cpp](src/arduino_serial_driver.cpp) | 아두이노로 **시리얼 전송** |
-| 6 | [urdf/manipulator_sim.urdf.xacro](urdf/manipulator_sim.urdf.xacro) + [launch/gazebo.launch.py](launch/gazebo.launch.py) | 실제 하드웨어를 **Gazebo 물리 시뮬레이션으로 교체** |
-| 7 | `manipulator_moveit_config` (추가 예정) | 목표 자세에서 충돌 없는 조인트 궤적을 계산해 기존 controller로 전달 |
+| 1 | [urdf/manipulator.xacro](my_manipulator/urdf/manipulator.xacro) | 로봇이 **어떻게 생겼나** (링크·조인트·메쉬) — 모든 것의 기반 |
+| 2 | [launch/display.launch.py](my_manipulator/launch/display.launch.py) | 그 모델을 **RViz로 띄우는** 가장 단순한 실행 |
+| 3 | [urdf/manipulator_real.urdf.xacro](my_manipulator/urdf/manipulator_real.urdf.xacro) + [config/my_controllers.yaml](my_manipulator/config/my_controllers.yaml) | 모델에 **실제 로봇 제어 설정**을 붙임 |
+| 4 | [src/arduino_hardware_interface.cpp](my_manipulator/src/arduino_hardware_interface.cpp) | 제어 명령을 **실제로 처리**하는 C++ (직접 만든 하드웨어 인터페이스) |
+| 5 | [src/arduino_serial_driver.cpp](my_manipulator/src/arduino_serial_driver.cpp) | 아두이노로 **시리얼 전송** |
+| 6 | [urdf/manipulator_sim.urdf.xacro](my_manipulator/urdf/manipulator_sim.urdf.xacro) + [launch/gazebo.launch.py](my_manipulator/launch/gazebo.launch.py) | 실제 하드웨어를 **Gazebo 물리 시뮬레이션으로 교체** |
+| 7 | `my_manipulator_moveit` (추가 예정) | 목표 자세에서 충돌 없는 조인트 궤적을 계산해 기존 controller로 전달 |
 
 6장에서는 1~5장에서 배운 모델, controller, command/state interface가 Gazebo에서도 어떻게 그대로 이어지는지 비교한다. 7장에서는 그 위에 MoveIt 2를 올려, 조인트 값을 직접 정하던 단계에서 엔드이펙터의 목표 자세와 충돌 회피 경로를 다루는 단계로 넘어간다.
 
@@ -231,7 +231,7 @@ mimic
 그래서 실제 로봇용 파일인 `manipulator_real.urdf.xacro`는 이 기본 모델을 먼저 가져온다.
 
 ```xml
-<xacro:include filename="$(find manipulator)/urdf/manipulator.xacro" />
+<xacro:include filename="$(find my_manipulator)/urdf/manipulator.xacro" />
 ```
 
 이제 로봇의 모양은 준비됐다. 하지만 아직 ROS 2는 다음을 모른다.
@@ -295,13 +295,13 @@ dry_run
 그래서 실행할 때 포트나 dry-run 여부를 바꿔 줄 수 있다. launch에서 받은 값이 xacro로 들어가 `robot_description`에 포함되는 흐름은 아래의 `③ real_robot.launch.py에서 묶이는 방식`에서 다시 본다.
 
 ```bash
-ros2 launch manipulator real_robot.launch.py serial_port:=/dev/ttyACM0
+ros2 launch my_manipulator real_robot.launch.py serial_port:=/dev/ttyACM0
 ```
 
 Arduino 없이 안전하게 흐름만 확인하려면 dry-run을 켠다.
 
 ```bash
-ros2 launch manipulator real_robot.launch.py dry_run:=true
+ros2 launch my_manipulator real_robot.launch.py dry_run:=true
 ```
 
 다음으로 실제 제어할 joint를 적는다. 예를 들어 `joint_1`은 이렇게 설정되어 있다.
@@ -393,8 +393,9 @@ joint_state_broadcaster
   상태 담당 controller
   하드웨어 상태를 /joint_states로 내보낸다.
 
-joint_trajectory_controller
-  명령 담당 controller
+arm_controller
+  명령 담당 controller 인스턴스
+  joint_trajectory_controller plugin으로 만들어진다.
   목표 궤적을 받아 조인트 position 명령을 만든다.
 ```
 
@@ -422,7 +423,7 @@ controller_manager:
 joint_state_broadcaster:
   type: joint_state_broadcaster/JointStateBroadcaster
 
-joint_trajectory_controller:
+arm_controller:
   type: joint_trajectory_controller/JointTrajectoryController
 ```
 
@@ -435,14 +436,15 @@ joint_state_broadcaster
   하드웨어의 state_interface를 읽어 /joint_states를 발행한다.
   실제 로봇 실행에서는 2번의 joint_state_publisher_gui 대신 이 controller가 상태를 내보낸다.
 
-joint_trajectory_controller
+arm_controller
+  joint_trajectory_controller plugin으로 만들어지는 controller 인스턴스다.
   목표 궤적 명령을 받아 각 joint의 command_interface에 position 명령을 쓴다.
 ```
 
-마지막으로 `joint_trajectory_controller`가 어떤 joint를 제어할지 적는다.
+마지막으로 `arm_controller`가 어떤 joint를 제어할지 적는다.
 
 ```yaml
-joint_trajectory_controller:
+arm_controller:
   ros__parameters:
     joints:
       - joint_1
@@ -502,7 +504,7 @@ rviz2 노드
 
 ```text
 외부의 JointTrajectory 명령
-  -> joint_trajectory_controller
+  -> arm_controller
   -> 5개 position command interface
   -> ArduinoHardwareInterface::write()
   -> radian/meter 명령을 서보 각도로 변환
@@ -536,9 +538,9 @@ points.time_from_start
   그 위치까지 이동할 시간
 ```
 
-이 메시지를 `/joint_trajectory_controller/joint_trajectory` 토픽에 발행하면 `joint_trajectory_controller`가 받는다.
+이 메시지를 `/arm_controller/joint_trajectory` 토픽에 발행하면 `arm_controller`가 받는다.
 
-`joint_trajectory_controller`는 `controller_manager` 패키지에서 제공하는 controller 기능 모듈이며, 실행할 때 `ros2_control_node` 안에 불러온다. 이 controller는 메시지에 적힌 목표 시간에 맞춰 중간 위치들을 계산하고, 현재 시점의 목표 위치를 각 조인트의 `position command interface`에 기록한다.
+`arm_controller`는 `controller_manager` 패키지에서 제공하는 controller 기능 모듈이며, 실행할 때 `ros2_control_node` 안에 불러온다. 이 controller는 메시지에 적힌 목표 시간에 맞춰 중간 위치들을 계산하고, 현재 시점의 목표 위치를 각 조인트의 `position command interface`에 기록한다.
 
 `position command interface`는 controller가 계산한 위치를 저장하고 하드웨어 쪽에 전달하는 내부 메모리 통로다. 토픽을 하나 더 발행하는 것이 아니라, `ros2_control_node` 안에서 값을 공유한다.
 
@@ -550,8 +552,8 @@ points.time_from_start
 JointTrajectory 메시지
   조인트 이름, 목표 위치, 이동 시간을 담아 토픽으로 전송
       ↓
-joint_trajectory_controller
-  ros2_control_node 안에서 실행되는 controller 기능 모듈
+arm_controller
+  ros2_control_node 안에서 joint_trajectory_controller plugin으로 실행되는 controller 인스턴스
   시간에 따른 각 조인트의 목표 위치를 계산
       ↓
 position command interface
@@ -567,7 +569,7 @@ Arduino serial
 
 Gazebo를 실행할 때는 `ArduinoHardwareInterface` 대신 Gazebo용 하드웨어 인터페이스가 같은 자리에 들어간다. 둘이 동시에 사용되는 것이 아니라, 실제 로봇용 xacro와 시뮬레이션용 xacro 중 무엇을 실행했는지에 따라 하나가 선택된다.
 
-`joint_trajectory_controller`는 어느 구현이 선택되었는지 알 필요가 없다. 두 구현 모두 ros2_control의 공통 규격인 `position command interface`를 제공하기 때문이다.
+`arm_controller`는 어느 구현이 선택되었는지 알 필요가 없다. 두 구현 모두 ros2_control의 공통 규격인 `position command interface`를 제공하기 때문이다.
 
 ### ArduinoHardwareInterface가 실행되는 순서
 
@@ -623,9 +625,9 @@ ArduinoHardwareInterface::write()
 hw_positions_ = hw_commands_;
 ```
 
-이 대입으로 `hw_positions_`가 바뀌면 연결된 position state interface에서도 같은 값이 보인다. `joint_state_broadcaster`는 이 값을 읽어 `/joint_states`를 발행하고, `joint_trajectory_controller`도 현재 상태로 읽을 수 있다.
+이 대입으로 `hw_positions_`가 바뀌면 연결된 position state interface에서도 같은 값이 보인다. `joint_state_broadcaster`는 이 값을 읽어 `/joint_states`를 발행하고, `arm_controller`도 현재 상태로 읽을 수 있다.
 
-그 다음 `joint_trajectory_controller`가 이번 주기의 목표 위치를 계산해 position command interface에 기록한다. 이 interface는 `hw_commands_`에 연결되어 있으므로 별도의 복사 함수 없이 배열 값이 바로 바뀐다.
+그 다음 `arm_controller`가 이번 주기의 목표 위치를 계산해 position command interface에 기록한다. 이 interface는 `hw_commands_`에 연결되어 있으므로 별도의 복사 함수 없이 배열 값이 바로 바뀐다.
 
 마지막으로 `write()`가 새 `hw_commands_`를 읽는다. 각 ROS 위치를 서보 각도로 변환하고 CSV 한 줄을 만든 뒤 Arduino에 전송한다. dry-run에서는 같은 CSV를 시리얼로 보내지 않고 터미널에 출력한다.
 
@@ -636,7 +638,7 @@ read()
 joint_state_broadcaster
   hw_positions_를 읽어 /joint_states 발행
 
-joint_trajectory_controller
+arm_controller
   새 목표 위치를 hw_commands_에 기록
 
 write()
@@ -738,7 +740,7 @@ RViz는 전달받은 상태를 그대로 그린다. 목표 위치가 물리적�
 
 ```text
 trajectory_msgs/msg/JointTrajectory 메시지
-  -> joint_trajectory_controller (ros2_control의 controller 모듈)
+  -> arm_controller (joint_trajectory_controller plugin으로 만든 controller)
   -> position command interface (ros2_control 내부에서 위치 명령을 공유하는 메모리)
   -> ArduinoHardwareInterface::write() (직접 작성한 C++ hardware interface 클래스의 함수)
   -> ArduinoSerialDriver (CSV를 USB serial로 전송하는 C++ 통신 클래스)
@@ -749,13 +751,13 @@ Gazebo에서는 controller 앞부분을 바꾸지 않는다.
 
 ```text
 trajectory_msgs/msg/JointTrajectory 메시지
-  -> joint_trajectory_controller (ros2_control의 controller 모듈)
+  -> arm_controller (joint_trajectory_controller plugin으로 만든 controller)
   -> position command interface (ros2_control 내부에서 위치 명령을 공유하는 메모리)
   -> GazeboSystem (Gazebo용 hardware interface 플러그인)
   -> Gazebo 조인트와 물리 엔진 (명령을 적용하고 상태를 계산하는 시뮬레이션)
 ```
 
-`joint_trajectory_controller`는 상대가 실제 Arduino인지 Gazebo인지 알 필요가 없다. 두 hardware implementation이 모두 같은 position command/state interface를 제공하기 때문이다.
+`arm_controller`는 상대가 실제 Arduino인지 Gazebo인지 알 필요가 없다. 두 hardware implementation이 모두 같은 position command/state interface를 제공하기 때문이다.
 
 이 교체 가능성이 ros2_control을 사용하는 중요한 이유다. 상위 제어 코드는 유지하면서 실제 장치, dry-run 구현, 시뮬레이터를 선택할 수 있다.
 
@@ -764,7 +766,7 @@ trajectory_msgs/msg/JointTrajectory 메시지
 시뮬레이션 파일도 실제 로봇 파일처럼 공통 모델부터 가져온다.
 
 ```xml
-<xacro:include filename="$(find manipulator)/urdf/manipulator.xacro" />
+<xacro:include filename="$(find my_manipulator)/urdf/manipulator.xacro" />
 ```
 
 따라서 RViz, 실제 로봇, Gazebo가 같은 link, joint, mesh와 joint limit을 사용한다. 달라지는 것은 `<ros2_control>`의 hardware plugin이다.
@@ -814,7 +816,7 @@ Gazebo용 각 조인트에도 controller가 사용할 command/state interface가
 </joint>
 ```
 
-`joint_trajectory_controller`는 계속 5개 조인트만 명령하고, 오른쪽 그리퍼 상태는 왼쪽 그리퍼의 mimic 관계를 따른다.
+`arm_controller`는 계속 5개 조인트만 명령하고, 오른쪽 그리퍼 상태는 왼쪽 그리퍼의 mimic 관계를 따른다.
 
 ### ② libgazebo_ros2_control.so — Gazebo와 ros2_control 연결
 
@@ -823,7 +825,7 @@ Gazebo용 각 조인트에도 controller가 사용할 command/state interface가
 ```xml
 <gazebo>
   <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
-    <parameters>$(find manipulator)/config/my_controllers.yaml</parameters>
+    <parameters>$(find my_manipulator)/config/my_controllers.yaml</parameters>
   </plugin>
 </gazebo>
 ```
@@ -845,7 +847,7 @@ plugin은 실제 로봇에서 사용한 것과 같은 `my_controllers.yaml`을 �
 ```text
 controller_manager update_rate: 100 Hz
 joint_state_broadcaster
-joint_trajectory_controller
+arm_controller
 5개의 position 명령축
 ```
 
@@ -873,7 +875,7 @@ robot_description 토픽을 사용해 spawn_entity 실행
 로봇이 Gazebo에 spawn됨
 libgazebo_ros2_control.so가 controller manager 생성
 joint_state_broadcaster 시작
-joint_trajectory_controller 시작
+arm_controller 시작
 ```
 
 핵심은 controller를 시작하는 시점이다.
@@ -884,7 +886,7 @@ start_controllers = RegisterEventHandler(
         target_action=spawn_entity,
         on_exit=[
             joint_state_broadcaster_spawner,
-            joint_trajectory_controller_spawner,
+            arm_controller_spawner,
         ],
     )
 )
@@ -907,7 +909,7 @@ hw_positions_ = hw_commands_
 Gazebo에서는 state가 물리 엔진의 계산 결과에서 나온다.
 
 ```text
-joint_trajectory_controller
+arm_controller
   -> 이번 제어 주기의 목표 위치 계산
   -> GazeboSystem의 command interface에 기록
   -> Gazebo 물리 엔진이 조인트 상태 계산
@@ -968,7 +970,7 @@ joint limit
 
 ```bash
 source ~/ros2_ws/install/setup.bash
-ros2 launch manipulator gazebo.launch.py
+ros2 launch my_manipulator gazebo.launch.py
 ```
 
 로봇 spawn이 끝난 후 터미널 2에서 controller를 확인한다.
@@ -982,7 +984,7 @@ ros2 control list_controllers
 
 ```text
 joint_state_broadcaster       active
-joint_trajectory_controller   active
+arm_controller                active
 ```
 
 Gazebo가 계산한 조인트 상태를 확인한다.
@@ -995,7 +997,7 @@ ros2 topic echo /joint_states
 
 ```bash
 ros2 topic pub --once \
-  /joint_trajectory_controller/joint_trajectory \
+  /arm_controller/joint_trajectory \
   trajectory_msgs/msg/JointTrajectory \
   '{
     joint_names: ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5_left"],
@@ -1032,7 +1034,7 @@ Gazebo가 움직인다고 실제 로봇도 반드시 같은 방식으로 움직�
 
 ```text
 사람이 joint_1 ~ joint_5_left의 목표값 결정
-  -> joint_trajectory_controller
+  -> arm_controller
   -> Gazebo 또는 실제 로봇
 ```
 
@@ -1045,7 +1047,7 @@ Gazebo가 움직인다고 실제 로봇도 반드시 같은 방식으로 움직�
 계산한 경로를 controller가 실행할 수 있는 궤적으로 만들 수 있는가?
 ```
 
-MoveIt 2가 이 계산을 담당한다. 지금까지 만든 URDF, TF, `/joint_states`, `joint_trajectory_controller`를 버리고 새로운 제어 시스템으로 바꾸는 것이 아니다. 그 위에 경로를 계획하는 상위 계층을 추가한다.
+MoveIt 2가 이 계산을 담당한다. 지금까지 만든 URDF, TF, `/joint_states`, `arm_controller`를 버리고 새로운 제어 시스템으로 바꾸는 것이 아니다. 그 위에 경로를 계획하는 상위 계층을 추가한다.
 
 ```text
 목표 자세(Pose) 또는 목표 조인트 값
@@ -1055,7 +1057,7 @@ MoveIt 2가 이 계산을 담당한다. 지금까지 만든 URDF, TF, `/joint_st
      - 충돌 검사
      - 경로 계획
   -> JointTrajectory
-  -> 기존 joint_trajectory_controller
+  -> 기존 arm_controller
   -> 기존 ros2_control command interface
   -> GazeboSystem 또는 ArduinoHardwareInterface
 ```
@@ -1064,19 +1066,19 @@ MoveIt 2가 이 계산을 담당한다. 지금까지 만든 URDF, TF, `/joint_st
 
 ### 기존 패키지와 새 MoveIt 패키지의 관계
 
-MoveIt 설정은 기존 `manipulator` 패키지에 모두 넣지 않고 `manipulator_moveit_config`라는 별도 ROS 2 패키지로 만든다.
+MoveIt 설정은 기존 `my_manipulator` 패키지에 모두 넣지 않고 `my_manipulator_moveit`라는 별도 ROS 2 패키지로 만든다. 두 패키지는 같은 GitHub 리포지토리 `manipulator` 안에서 함께 버전 관리한다.
 
 두 패키지는 다음처럼 역할을 나눈다.
 
 ```text
-manipulator
+my_manipulator
   로봇 자체를 설명하고 움직이는 패키지
   - URDF/Xacro와 mesh
   - ros2_control 설정
   - Gazebo 실행
   - 실제 Arduino hardware interface
 
-manipulator_moveit_config
+my_manipulator_moveit
   그 로봇의 경로 계획 방법을 설명하는 패키지
   - planning group
   - IK solver
@@ -1090,39 +1092,42 @@ manipulator_moveit_config
 
 ```text
 ros2_ws/src/
-├── manipulator/
-│   ├── urdf/
-│   │   ├── manipulator.xacro
-│   │   ├── manipulator_sim.urdf.xacro
-│   │   └── manipulator_real.urdf.xacro
-│   ├── meshes/
-│   ├── config/
-│   │   └── my_controllers.yaml
-│   ├── launch/
-│   │   ├── gazebo.launch.py
-│   │   └── real_robot.launch.py
-│   └── src/
-│       └── Arduino hardware interface와 serial driver
-│
-└── manipulator_moveit_config/
-    ├── package.xml
-    ├── CMakeLists.txt
-    ├── .setup_assistant
-    ├── config/
-    │   ├── manipulator.srdf
-    │   ├── kinematics.yaml
-    │   ├── joint_limits.yaml
-    │   ├── ompl_planning.yaml
-    │   ├── moveit_controllers.yaml
-    │   └── moveit.rviz
-    └── launch/
-        ├── demo.launch.py
-        ├── move_group.launch.py
-        ├── moveit_rviz.launch.py
-        └── gazebo_moveit.launch.py
+└── manipulator/                  # GitHub repository
+    ├── README.md
+    ├── LEARNING_NOTES.md
+    ├── my_manipulator/           # base ROS 2 package
+    │   ├── urdf/
+    │   │   ├── manipulator.xacro
+    │   │   ├── manipulator_sim.urdf.xacro
+    │   │   └── manipulator_real.urdf.xacro
+    │   ├── meshes/
+    │   ├── config/
+    │   │   └── my_controllers.yaml
+    │   ├── launch/
+    │   │   ├── display.launch.py
+    │   │   ├── gazebo.launch.py
+    │   │   └── real_robot.launch.py
+    │   └── src/
+    │       └── Arduino hardware interface와 serial driver
+    └── my_manipulator_moveit/    # MoveIt 2 config package
+        ├── package.xml
+        ├── CMakeLists.txt
+        ├── .setup_assistant
+        ├── config/
+        │   ├── manipulator.srdf
+        │   ├── kinematics.yaml
+        │   ├── joint_limits.yaml
+        │   ├── ompl_planning.yaml
+        │   ├── moveit_controllers.yaml
+        │   └── moveit.rviz
+        └── launch/
+            ├── demo.launch.py
+            ├── move_group.launch.py
+            ├── moveit_rviz.launch.py
+            └── gazebo_moveit.launch.py
 ```
 
-`manipulator_moveit_config`가 별도 패키지여도 로봇 모델을 새로 만드는 것은 아니다. 형상과 조인트의 원본은 계속 `manipulator` 패키지에 두고, MoveIt 패키지가 그 모델을 불러와 계획에 필요한 의미와 설정을 덧붙인다.
+`my_manipulator_moveit`가 별도 패키지여도 로봇 모델을 새로 만드는 것은 아니다. 형상과 조인트의 원본은 계속 `my_manipulator` 패키지에 두고, MoveIt 패키지가 그 모델을 불러와 계획에 필요한 의미와 설정을 덧붙인다.
 
 ### 전체 실행 구조와 각 구성의 역할
 
@@ -1143,7 +1148,7 @@ RViz에서 목표 자세 입력
   -> IK와 충돌 없는 경로 계산
   -> RViz에서 계획 경로 미리보기
   -> Execute
-  -> joint_trajectory_controller
+  -> arm_controller
   -> Gazebo 또는 실제 로봇
 ```
 
@@ -1186,15 +1191,15 @@ gripper planning group
 
 ### 기존 my_controllers.yaml은 무엇을 만들고 있는가
 
-MoveIt과 controller를 연결하기 전에 현재 사용 중인 `manipulator/config/my_controllers.yaml`의 역할을 다시 확인한다.
+MoveIt과 controller를 연결하기 전에 현재 사용 중인 `my_manipulator/config/my_controllers.yaml`의 역할을 다시 확인한다.
 
 ```yaml
 controller_manager:
   ros__parameters:
-    joint_trajectory_controller:
+    arm_controller:
       type: joint_trajectory_controller/JointTrajectoryController
 
-joint_trajectory_controller:
+arm_controller:
   ros__parameters:
     joints:
       - joint_1
@@ -1211,19 +1216,19 @@ joint_trajectory_controller:
 여기서 이름과 종류를 구분해야 한다.
 
 ```text
-joint_trajectory_controller
+arm_controller
   이 프로젝트에서 controller에 붙인 이름
 
 joint_trajectory_controller/JointTrajectoryController
   ros2_control이 불러오는 controller plugin의 종류
 ```
 
-이 YAML은 controller manager가 읽는다. 그 결과 `joint_trajectory_controller`라는 실제 controller가 생성되고, 이 controller가 다섯 조인트의 position command interface를 사용한다.
+이 YAML은 controller manager가 읽는다. 그 결과 `arm_controller`라는 실제 controller가 생성되고, 이 controller가 다섯 조인트의 position command interface를 사용한다.
 
 ```text
 my_controllers.yaml
   -> controller manager가 읽음
-  -> joint_trajectory_controller plugin 생성
+  -> joint_trajectory_controller plugin으로 arm_controller 생성
   -> joint_1 ~ joint_5_left의 command interface 사용
 ```
 
@@ -1232,20 +1237,20 @@ my_controllers.yaml
 6장에서는 다음 토픽으로 `JointTrajectory` 메시지를 직접 보냈다.
 
 ```text
-/joint_trajectory_controller/joint_trajectory
+/arm_controller/joint_trajectory
 ```
 
 전체 이름은 아래 두 부분으로 만들어진다.
 
 ```text
 controller 이름
-  joint_trajectory_controller
+  arm_controller
 
 controller가 제공하는 토픽 이름
   joint_trajectory
 
 결과
-  /joint_trajectory_controller/joint_trajectory
+  /arm_controller/joint_trajectory
 ```
 
 이 토픽 방식은 명령을 한 번 보내는 데는 간단하지만, 명령을 보낸 쪽이 실행 과정과 성공·실패 결과를 받기 어렵다. 실행 결과를 돌려주는 별도의 응답 통로가 없기 때문이다.
@@ -1253,20 +1258,20 @@ controller가 제공하는 토픽 이름
 `JointTrajectoryController`는 토픽 외에도 다음 action server를 기본으로 제공한다.
 
 ```text
-/joint_trajectory_controller/follow_joint_trajectory
+/arm_controller/follow_joint_trajectory
 ```
 
 이 이름도 같은 방법으로 만들어진다.
 
 ```text
 controller 이름
-  joint_trajectory_controller
+  arm_controller
 
 action namespace
   follow_joint_trajectory
 
 결과
-  /joint_trajectory_controller/follow_joint_trajectory
+  /arm_controller/follow_joint_trajectory
 ```
 
 `FollowJointTrajectory`는 새로운 controller의 이름이 아니다. `control_msgs/action/FollowJointTrajectory`라는 action 통신 형식이다. 내부 목표에는 지금까지 사용한 것과 같은 `trajectory_msgs/msg/JointTrajectory`가 들어가지만, action에는 다음 기능이 추가된다.
@@ -1290,24 +1295,24 @@ cancel
 ```text
 지금까지의 직접 명령
   ros2 topic pub
-    -> /joint_trajectory_controller/joint_trajectory
+    -> /arm_controller/joint_trajectory
     -> trajectory 실행
     -> 명령을 보낸 쪽에서 최종 결과를 직접 받지 않음
 
 MoveIt의 실행
   move_group의 action client
-    -> /joint_trajectory_controller/follow_joint_trajectory
+    -> /arm_controller/follow_joint_trajectory
     -> 같은 controller가 trajectory 실행
     -> feedback과 최종 결과를 move_group이 받음
 ```
 
-MoveIt은 계획한 경로가 실제로 끝났는지 감시해야 하므로 action 방식을 사용한다. 새로운 ros2_control controller를 만드는 것이 아니라, 이미 사용 중인 `joint_trajectory_controller`가 제공하는 다른 명령 통로를 사용하는 것이다.
+MoveIt은 계획한 경로가 실제로 끝났는지 감시해야 하므로 action 방식을 사용한다. 새로운 ros2_control controller를 만드는 것이 아니라, 이미 사용 중인 `arm_controller`가 제공하는 다른 명령 통로를 사용하는 것이다.
 
 실행 중인 action은 다음 명령으로 확인할 수 있다.
 
 ```bash
 ros2 action list
-ros2 action info /joint_trajectory_controller/follow_joint_trajectory
+ros2 action info /arm_controller/follow_joint_trajectory
 ```
 
 ### my_controllers.yaml과 moveit_controllers.yaml의 차이
@@ -1316,8 +1321,8 @@ ros2 action info /joint_trajectory_controller/follow_joint_trajectory
 
 | 파일 | 읽는 주체 | 역할 |
 |---|---|---|
-| `manipulator/config/my_controllers.yaml` | ros2_control의 controller manager | controller plugin을 실제로 생성하고 사용할 joint와 command/state interface를 정함 |
-| `manipulator_moveit_config/config/moveit_controllers.yaml` | MoveIt의 `move_group` | 이미 실행 중인 controller의 action 주소와 담당 joint를 알려줌 |
+| `my_manipulator/config/my_controllers.yaml` | ros2_control의 controller manager | controller plugin을 실제로 생성하고 사용할 joint와 command/state interface를 정함 |
+| `my_manipulator_moveit/config/moveit_controllers.yaml` | MoveIt의 `move_group` | 이미 실행 중인 controller의 action 주소와 담당 joint를 알려줌 |
 
 두 파일은 같은 controller를 서로 다른 쪽에서 설명하므로 내용이 다르다. `moveit_controllers.yaml`이 controller를 새로 생성하거나 hardware interface에 연결하는 것은 아니다.
 
@@ -1328,9 +1333,9 @@ moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControll
 
 moveit_simple_controller_manager:
   controller_names:
-    - joint_trajectory_controller
+    - arm_controller
 
-  joint_trajectory_controller:
+  arm_controller:
     action_ns: follow_joint_trajectory
     type: FollowJointTrajectory
     default: true
@@ -1348,7 +1353,7 @@ moveit_simple_controller_manager:
 controller_names
   MoveIt이 사용할 수 있는 controller 이름 목록
 
-joint_trajectory_controller
+arm_controller
   my_controllers.yaml에서 실제로 생성한 controller와 맞출 이름
 
 action_ns: follow_joint_trajectory
@@ -1366,11 +1371,11 @@ joints
 ```text
 controller 이름 + action namespace
 
-joint_trajectory_controller + follow_joint_trajectory
-  -> /joint_trajectory_controller/follow_joint_trajectory
+arm_controller + follow_joint_trajectory
+  -> /arm_controller/follow_joint_trajectory
 ```
 
-여기서 “기존 controller 이름을 재사용한다”는 말은 `my_controllers.yaml` 전체를 복사한다는 뜻이 아니다. 두 파일에 적힌 `joint_trajectory_controller`라는 이름을 맞춰, MoveIt이 이미 실행 중인 controller의 action server를 찾아가게 한다는 뜻이다.
+여기서 “기존 controller 이름을 재사용한다”는 말은 `my_controllers.yaml` 전체를 복사한다는 뜻이 아니다. 두 파일에 적힌 `arm_controller`라는 이름을 맞춰, MoveIt이 이미 실행 중인 controller의 action server를 찾아가게 한다는 뜻이다.
 
 ### arm 그룹과 기존 controller의 joint 수 문제
 
@@ -1384,10 +1389,10 @@ arm
   joint_4
 ```
 
-하지만 현재 `joint_trajectory_controller`는 그리퍼까지 포함한 다섯 조인트를 제어한다.
+하지만 현재 `arm_controller`는 그리퍼까지 포함한 다섯 조인트를 제어한다.
 
 ```text
-joint_trajectory_controller
+arm_controller
   joint_1
   joint_2
   joint_3
@@ -1400,7 +1405,7 @@ joint_trajectory_controller
 첫 실습에서는 controller를 팔과 그리퍼로 나누지 않고, 기존 controller 하나를 유지하면서 다음 옵션을 `my_controllers.yaml`에 추가한다.
 
 ```yaml
-joint_trajectory_controller:
+arm_controller:
   ros__parameters:
     allow_partial_joints_goal: true
 ```
@@ -1419,9 +1424,9 @@ gripper 계획 실행
 
 이 방식은 현재 controller 구조를 최소한으로 변경해 MoveIt 연결을 배우기 위한 선택이다. 이후 팔과 그리퍼를 독립적으로 운용할 필요가 커지면 `arm_trajectory_controller`와 gripper용 controller를 분리하는 구조를 다시 검토할 수 있다.
 
-### manipulator_moveit_config의 주요 설정 파일
+### my_manipulator_moveit의 주요 설정 파일
 
-MoveIt Setup Assistant로 생성할 `manipulator_moveit_config`의 주요 파일은 다음 역할을 맡는다.
+MoveIt Setup Assistant로 생성할 `my_manipulator_moveit`의 주요 파일은 다음 역할을 맡는다.
 
 ```text
 package.xml
@@ -1466,25 +1471,192 @@ launch/gazebo_moveit.launch.py
 
 ### 적용 순서
 
+아래 순서는 이 리포지토리 상태에서 그대로 따라가기 위한 실습 경로다. 핵심은 **MoveIt 설정은 생성하고**, **Gazebo/실제 로봇을 실행하는 controller는 기존 `my_manipulator` 쪽 것을 계속 사용한다**는 점이다.
+
+```text
+1. 의존성 설치와 현재 로봇 모델 점검
+2. MoveIt Setup Assistant로 SRDF와 planning 설정 생성
+3. 생성된 설정에서 controller 이름을 arm_controller로 맞춤
+4. MoveIt 단독 Plan 확인
+5. Gazebo의 arm_controller action으로 Execute 연결
+6. 장애물과 코드 제어로 확장
+7. 실제 로봇 launch로 하드웨어만 교체
+```
+
 #### 1단계 — 설치와 모델 사전 점검
 
-- ROS 2 배포판과 맞는 MoveIt 2 및 Setup Assistant를 설치한다.
-- xacro가 오류 없이 URDF로 변환되는지 확인한다.
-- joint limit, joint 이름, `world`에서 `link_5`까지의 kinematic chain을 확인한다.
-- 기존 `joint_trajectory_controller`의 FollowJointTrajectory action이 활성화되는지 확인한다.
+MoveIt 2와 Setup Assistant를 설치한다.
+
+```bash
+sudo apt update
+sudo apt install -y \
+  ros-humble-moveit \
+  ros-humble-moveit-setup-assistant
+```
+
+현재 워크스페이스를 빌드하고 환경을 읽는다.
+
+```bash
+cd ~/ros2_ws
+colcon build --packages-select my_manipulator my_manipulator_moveit
+source install/setup.bash
+```
+
+xacro가 오류 없이 URDF로 변환되는지 확인한다.
+
+```bash
+xacro src/manipulator/my_manipulator/urdf/manipulator.xacro > /tmp/my_manipulator.urdf
+check_urdf /tmp/my_manipulator.urdf
+```
+
+Gazebo 쪽 controller가 `arm_controller` 이름으로 올라오는지도 먼저 확인한다.
+
+터미널 1:
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch my_manipulator gazebo.launch.py
+```
+
+터미널 2:
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 control list_controllers
+ros2 action info /arm_controller/follow_joint_trajectory
+```
+
+예상되는 controller 이름은 다음과 같다.
+
+```text
+joint_state_broadcaster       active
+arm_controller                active
+```
 
 #### 2단계 — MoveIt 설정 패키지 생성
 
-- Setup Assistant에 `manipulator.xacro`를 불러온다.
-- self-collision matrix를 생성한다.
-- `arm`과 `gripper` planning group을 만든다.
-- `link_5`를 기준으로 end effector 설정을 만든다.
-- 초기 자세를 named state로 등록한다.
-- `manipulator_moveit_config` 패키지를 생성한다.
+Setup Assistant를 실행한다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch moveit_setup_assistant setup_assistant.launch.py
+```
+
+GUI에서는 다음 순서로 진행한다.
+
+```text
+Start
+  Create New MoveIt Configuration Package 선택
+  Load Files에서 아래 xacro 선택
+  ~/ros2_ws/src/manipulator/my_manipulator/urdf/manipulator.xacro
+
+Self-Collisions
+  Generate Collision Matrix 실행
+
+Planning Groups
+  arm 그룹 생성
+    kinematic chain 또는 joint 목록으로 joint_1 ~ joint_4 포함
+    목표 link는 우선 link_5 기준으로 생각한다.
+
+  gripper 그룹 생성
+    joint 목록으로 joint_5_left 포함
+    joint_5_right는 mimic joint라 독립 명령축으로 넣지 않는다.
+
+Robot Poses
+  home 같은 기본 자세를 하나 등록
+
+End Effectors
+  gripper 그룹을 end effector로 등록
+  parent link는 link_5 사용
+
+ROS 2 Controllers
+  controller 이름은 arm_controller 사용
+  type은 FollowJointTrajectory 사용
+  joints는 joint_1, joint_2, joint_3, joint_4, joint_5_left 사용
+
+Configuration Files
+  package path를 아래 경로로 지정
+  ~/ros2_ws/src/manipulator/my_manipulator_moveit
+  Generate Package 실행
+```
+
+Setup Assistant가 기존 `package.xml`, `CMakeLists.txt`, `config/moveit_controllers.yaml`을 덮어쓸 수 있다. 생성 후에는 다음 항목을 다시 확인한다.
+
+```text
+패키지 이름: my_manipulator_moveit
+기본 로봇 패키지 참조: my_manipulator
+controller 이름: arm_controller
+action namespace: follow_joint_trajectory
+```
 
 이 단계에서는 아직 Gazebo 물리를 검증하려는 것이 아니라, MoveIt이 로봇의 관절 구조와 충돌 형상을 올바르게 읽는지 확인한다.
 
+생성 후 다시 빌드한다.
+
+```bash
+cd ~/ros2_ws
+colcon build --packages-select my_manipulator my_manipulator_moveit
+source install/setup.bash
+```
+
+#### 2.5단계 — 생성된 controller 설정 확인
+
+`my_manipulator_moveit/config/moveit_controllers.yaml`은 최소한 다음 구조여야 한다.
+
+```yaml
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - arm_controller
+
+  arm_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory
+    default: true
+    joints:
+      - joint_1
+      - joint_2
+      - joint_3
+      - joint_4
+      - joint_5_left
+```
+
+`my_manipulator/config/my_controllers.yaml`에는 MoveIt이 arm 그룹의 일부 joint만 보내도 거부하지 않도록 다음 옵션이 들어 있어야 한다.
+
+```yaml
+arm_controller:
+  ros__parameters:
+    allow_partial_joints_goal: true
+```
+
+여기서 다시 한 번 이름을 구분한다.
+
+```text
+arm_controller
+  우리가 만든 controller 인스턴스 이름
+
+joint_trajectory_controller/JointTrajectoryController
+  arm_controller를 만들 때 사용하는 ros2_control plugin 타입
+
+FollowJointTrajectory
+  MoveIt이 arm_controller로 목표를 보낼 때 사용하는 action 형식
+```
+
 #### 3단계 — MoveIt 단독 계획 확인
+
+Setup Assistant가 생성한 launch 파일 이름은 버전에 따라 조금 다를 수 있다. 보통은 먼저 demo launch로 MoveIt 설정이 단독으로 열리는지 확인한다.
+
+```bash
+ros2 launch my_manipulator_moveit demo.launch.py
+```
+
+만약 생성된 파일명이 다르면 아래 명령으로 launch 파일을 확인한다.
+
+```bash
+ros2 pkg prefix my_manipulator_moveit
+ls ~/ros2_ws/src/manipulator/my_manipulator_moveit/launch
+```
 
 RViz MotionPlanning 패널에서 다음을 확인한다.
 
@@ -1505,16 +1677,46 @@ Gazebo가 로봇, `/joint_states`, controller manager를 제공하고 MoveIt은 
 gazebo.launch.py
   -> Gazebo 로봇
   -> joint_state_broadcaster
-  -> joint_trajectory_controller
+  -> arm_controller
   -> /joint_states
 
 MoveIt launch
   -> move_group
   -> RViz MotionPlanning
-  -> 기존 joint_trajectory_controller의 action 사용
+  -> 기존 arm_controller의 action 사용
 ```
 
 MoveIt의 demo launch가 fake hardware나 별도의 controller manager를 함께 시작한다면 Gazebo와 중복될 수 있다. 따라서 Gazebo 연동 launch에서는 `move_group`과 MoveIt RViz만 실행하고, 로봇 상태와 controller는 기존 Gazebo 경로의 것을 사용한다.
+
+실행은 터미널을 나누어 확인한다.
+
+터미널 1:
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch my_manipulator gazebo.launch.py
+```
+
+터미널 2:
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 action info /arm_controller/follow_joint_trajectory
+```
+
+터미널 3에서는 MoveIt 쪽 launch를 실행한다. 아직 `gazebo_moveit.launch.py`를 만들기 전이라면, Setup Assistant가 만든 `move_group.launch.py`와 `moveit_rviz.launch.py`를 조합하거나, 이후 별도 통합 launch를 만든다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch my_manipulator_moveit move_group.launch.py
+```
+
+다른 터미널:
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch my_manipulator_moveit moveit_rviz.launch.py
+```
 
 첫 통합 목표는 다음과 같다.
 
@@ -1559,7 +1761,7 @@ Gazebo 연결이 검증되면 아래쪽 실행 대상을 `real_robot.launch.py`�
 ```text
 MoveIt 계획 계층은 유지
 GazeboSystem 대신 ArduinoHardwareInterface 사용
-같은 joint_trajectory_controller action 사용
+같은 arm_controller action 사용
 ```
 
 실제 로봇에서는 현재 엔코더 피드백이 없어 명령 위치를 현재 위치로 간주한다. 따라서 MoveIt 화면에서 정상으로 보여도 로봇이 물리적으로 막혔는지는 알 수 없다. 처음에는 낮은 속도와 좁은 작업 범위에서 시험하고, 비상 정지와 전원 차단 수단을 준비해야 한다.
@@ -1619,7 +1821,7 @@ controller에서 잘못된 값이 들어와도 hardware interface가 URDF 범위
 ### RViz
 
 ```bash
-ros2 launch manipulator display.launch.py
+ros2 launch my_manipulator display.launch.py
 ```
 
 - Fixed Frame이 `world`인지
@@ -1629,7 +1831,7 @@ ros2 launch manipulator display.launch.py
 ### Gazebo
 
 ```bash
-ros2 launch manipulator gazebo.launch.py
+ros2 launch my_manipulator gazebo.launch.py
 ros2 control list_controllers
 ros2 topic echo /joint_states
 ```
@@ -1641,7 +1843,7 @@ ros2 topic echo /joint_states
 ### 실제 로봇
 
 ```bash
-ros2 launch manipulator real_robot.launch.py serial_port:=/dev/ttyACM0
+ros2 launch my_manipulator real_robot.launch.py serial_port:=/dev/ttyACM0
 ```
 
 - Arduino 없이 테스트할 때는 `dry_run:=true`로 실행했는지

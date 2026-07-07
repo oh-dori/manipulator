@@ -7,7 +7,7 @@
   <xacro:arg name="dry_run" default="false"/>
 
   <!-- 1. 공통 로봇 모델 포함 -->
-  <xacro:include filename="$(find manipulator)/urdf/manipulator.xacro" />
+  <xacro:include filename="$(find my_manipulator)/urdf/manipulator.xacro" />
 
   <!--
   ===================================================================

@@ -1,6 +1,8 @@
 # manipulator
 
-ROS 2 Humble용 소형 매니퓰레이터 패키지다. 하나의 공통 로봇 모델을 사용해 다음 세 가지 모드를 제공한다.
+ROS 2 Humble용 소형 매니퓰레이터 리포지토리다. 이 리포 안에서 기본 로봇 패키지 `my_manipulator`와 MoveIt 설정 패키지 `my_manipulator_moveit`를 함께 관리한다.
+
+`my_manipulator`는 하나의 공통 로봇 모델을 사용해 다음 세 가지 모드를 제공한다.
 
 - RViz: 형상, TF, 조인트 범위를 수동으로 확인
 - Gazebo Classic: `gazebo_ros2_control` 기반 물리 시뮬레이션
@@ -28,28 +30,39 @@ URDF에는 고정 조인트 1개와 가동 조인트 6개가 있다.
 
 ```text
 manipulator/
-├── config/my_controllers.yaml
-├── include/
-│   ├── arduino_hardware_interface.hpp
-│   ├── arduino_serial_driver.hpp
-│   └── visibility_control.h
-├── launch/
-│   ├── display.launch.py
-│   ├── gazebo.launch.py
-│   └── real_robot.launch.py
-├── src/
-│   ├── arduino_hardware_interface.cpp
-│   └── arduino_serial_driver.cpp
-└── urdf/
-    ├── manipulator.xacro
-    ├── manipulator_sim.urdf.xacro
-    └── manipulator_real.urdf.xacro
+├── README.md
+├── LEARNING_NOTES.md
+├── my_manipulator/
+│   ├── config/my_controllers.yaml
+│   ├── include/
+│   ├── launch/
+│   │   ├── display.launch.py
+│   │   ├── gazebo.launch.py
+│   │   └── real_robot.launch.py
+│   ├── meshes/
+│   ├── src/
+│   ├── urdf/
+│   │   ├── manipulator.xacro
+│   │   ├── manipulator_sim.urdf.xacro
+│   │   └── manipulator_real.urdf.xacro
+│   ├── CMakeLists.txt
+│   └── package.xml
+└── my_manipulator_moveit/
+    ├── config/
+    │   └── moveit_controllers.yaml
+    ├── launch/
+    ├── rviz/
+    ├── CMakeLists.txt
+    └── package.xml
 ```
 
-- `manipulator.xacro`: 링크, 조인트, mesh 등 공통 형상
-- `manipulator_sim.urdf.xacro`: Gazebo 하드웨어와 mimic 설정 추가
-- `manipulator_real.urdf.xacro`: Arduino 하드웨어와 서보 보정값 추가
-- `my_controllers.yaml`: 5개 명령축을 제어하는 trajectory controller 설정
+- `my_manipulator`: URDF/Xacro, mesh, ros2_control 설정, Gazebo/실제 로봇 launch, Arduino 하드웨어 인터페이스
+- `my_manipulator_moveit`: MoveIt 2의 SRDF, kinematics, planning, controller 연결, MoveIt launch 설정을 둘 패키지
+- `my_manipulator/urdf/manipulator.xacro`: 링크, 조인트, mesh 등 공통 형상
+- `my_manipulator/urdf/manipulator_sim.urdf.xacro`: Gazebo 하드웨어와 mimic 설정 추가
+- `my_manipulator/urdf/manipulator_real.urdf.xacro`: Arduino 하드웨어와 서보 보정값 추가
+- `my_manipulator/config/my_controllers.yaml`: 5개 명령축을 제어하는 trajectory controller 설정
+- `my_manipulator_moveit/config/moveit_controllers.yaml`: MoveIt이 `arm_controller`의 FollowJointTrajectory action을 찾기 위한 설정
 
 ## 설치와 빌드
 
@@ -70,14 +83,14 @@ sudo apt install -y \
 
 cd ~/ros2_ws
 rosdep install --from-paths src --ignore-src -r -y
-colcon build --packages-select manipulator
+colcon build --packages-select my_manipulator my_manipulator_moveit
 source install/setup.bash
 ```
 
 ## RViz 형상 확인
 
 ```bash
-ros2 launch manipulator display.launch.py
+ros2 launch my_manipulator display.launch.py
 ```
 
 `joint_state_publisher_gui`에는 `joint_1`부터 `joint_4`, `joint_5_left`까지 5개 슬라이더가 나타난다. `joint_5_right`는 mimic 조인트이므로 별도 슬라이더 없이 함께 움직인다.
@@ -90,7 +103,7 @@ RViz Fixed Frame은 `world`다.
 
 ```bash
 source ~/ros2_ws/install/setup.bash
-ros2 launch manipulator gazebo.launch.py
+ros2 launch my_manipulator gazebo.launch.py
 ```
 
 로봇 spawn이 완료된 후 터미널 2에서 컨트롤러 상태를 확인한다.
@@ -104,7 +117,7 @@ ros2 control list_controllers
 
 ```text
 joint_state_broadcaster       active
-joint_trajectory_controller   active
+arm_controller                active
 ```
 
 아래의 [조인트 이동 명령](#조인트-이동-명령)으로 로봇을 움직일 수 있다.
@@ -119,7 +132,7 @@ Arduino를 연결하지 않고 하드웨어 인터페이스와 controller 동작
 
 ```bash
 source ~/ros2_ws/install/setup.bash
-ros2 launch manipulator real_robot.launch.py dry_run:=true
+ros2 launch my_manipulator real_robot.launch.py dry_run:=true
 ```
 
 이 모드에서는 시리얼 포트를 열지 않는다. 조인트 명령을 보내면 Arduino로
@@ -146,7 +159,7 @@ ros2 control list_controllers
 
 ```bash
 source ~/ros2_ws/install/setup.bash
-ros2 launch manipulator real_robot.launch.py \
+ros2 launch my_manipulator real_robot.launch.py \
   serial_port:=/dev/ttyACM0 \
   baud_rate:=9600 \
   write_rate_hz:=20
@@ -155,7 +168,7 @@ ros2 launch manipulator real_robot.launch.py \
 기본 포트 `/dev/ttyUSB0`을 사용한다면 인자 없이 실행할 수도 있다.
 
 ```bash
-ros2 launch manipulator real_robot.launch.py
+ros2 launch my_manipulator real_robot.launch.py
 ```
 
 실행 후 터미널 2에서 [조인트 이동 명령](#조인트-이동-명령)을 전송한다.
@@ -168,7 +181,7 @@ Gazebo, 실제 로봇 dry-run, 실제 Arduino에서 동일한 명령을 사용�
 ```bash
 source ~/ros2_ws/install/setup.bash
 ros2 topic pub --once \
-  /joint_trajectory_controller/joint_trajectory \
+  /arm_controller/joint_trajectory \
   trajectory_msgs/msg/JointTrajectory \
   '{
     joint_names: ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5_left"],
@@ -186,7 +199,7 @@ ros2 topic pub --once \
 
 ```bash
 ros2 topic pub --once \
-  /joint_trajectory_controller/joint_trajectory \
+  /arm_controller/joint_trajectory \
   trajectory_msgs/msg/JointTrajectory \
   '{
     joint_names: ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5_left"],
@@ -239,13 +252,13 @@ URDF 최소 위치는 `servo_min_angle`, 최대 위치는 `servo_max_angle`에 �
 
 ```bash
 cd ~/ros2_ws
-colcon build --packages-select manipulator
-colcon test --packages-select manipulator
+colcon build --packages-select my_manipulator
+colcon test --packages-select my_manipulator
 colcon test-result --verbose
 
-xacro src/manipulator/urdf/manipulator.xacro > /tmp/manipulator.urdf
-xacro src/manipulator/urdf/manipulator_sim.urdf.xacro > /tmp/manipulator_sim.urdf
-xacro src/manipulator/urdf/manipulator_real.urdf.xacro > /tmp/manipulator_real.urdf
+xacro src/manipulator/my_manipulator/urdf/manipulator.xacro > /tmp/manipulator.urdf
+xacro src/manipulator/my_manipulator/urdf/manipulator_sim.urdf.xacro > /tmp/manipulator_sim.urdf
+xacro src/manipulator/my_manipulator/urdf/manipulator_real.urdf.xacro > /tmp/manipulator_real.urdf
 check_urdf /tmp/manipulator.urdf
 check_urdf /tmp/manipulator_sim.urdf
 check_urdf /tmp/manipulator_real.urdf

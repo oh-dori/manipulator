@@ -2,7 +2,7 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="manipulator">
 
   <!-- 1. 공통 로봇 모델 포함 -->
-  <xacro:include filename="$(find manipulator)/urdf/manipulator.xacro" />
+  <xacro:include filename="$(find my_manipulator)/urdf/manipulator.xacro" />
 
   <!--
   ===================================================================
@@ -33,7 +33,7 @@
   -->
   <gazebo>
     <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
-      <parameters>$(find manipulator)/config/my_controllers.yaml</parameters>
+      <parameters>$(find my_manipulator)/config/my_controllers.yaml</parameters>
     </plugin>
   </gazebo>
 

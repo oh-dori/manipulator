@@ -11,7 +11,7 @@ def generate_launch_description():
     declared_arguments.append(
         DeclareLaunchArgument(
             "use_sim_time",
-            default_value="false", # 실제 로봇은 시뮬레이션 시간을 사용하지 않습니다.
+            default_value="false",  # 실제 로봇은 시뮬레이션 시간을 사용하지 않습니다.
             description="Use simulation (Gazebo) clock if true",
         )
     )
@@ -52,13 +52,13 @@ def generate_launch_description():
     dry_run = LaunchConfiguration("dry_run")
 
     # Get the package path
-    pkg_manipulator_path = FindPackageShare('manipulator')
+    pkg_manipulator_path = FindPackageShare('my_manipulator')
 
     # 실제 로봇용 URDF 파일 경로 설정
     xacro_file = PathJoinSubstitution(
         [pkg_manipulator_path, "urdf", "manipulator_real.urdf.xacro"]
     )
-    
+
     # xacro 명령어를 사용하여 URDF 생성
     robot_description_content = Command(
         [
@@ -85,8 +85,10 @@ def generate_launch_description():
     ros2_control_node = Node(
         package="controller_manager",
         executable="ros2_control_node",
-        parameters=[robot_description, 
-                    PathJoinSubstitution([pkg_manipulator_path, "config", "my_controllers.yaml"])],
+        parameters=[
+            robot_description,
+            PathJoinSubstitution([pkg_manipulator_path, "config", "my_controllers.yaml"]),
+        ],
         output="screen",
     )
 
@@ -105,11 +107,11 @@ def generate_launch_description():
         arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
     )
 
-    # Joint trajectory controller spawner: 컨트롤러 매니저가 활성화된 후 실행됩니다.
-    joint_trajectory_controller_spawner = Node(
+    # Arm controller spawner: 컨트롤러 매니저가 활성화된 후 실행됩니다.
+    arm_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["joint_trajectory_controller", "--controller-manager", "/controller_manager"],
+        arguments=["arm_controller", "--controller-manager", "/controller_manager"],
     )
 
     rviz_node = Node(
@@ -124,6 +126,6 @@ def generate_launch_description():
         ros2_control_node,
         robot_state_publisher_node,
         joint_state_broadcaster_spawner,
-        joint_trajectory_controller_spawner,
+        arm_controller_spawner,
         rviz_node,
     ])

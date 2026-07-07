@@ -273,7 +273,9 @@ hardware_interface::return_type ArduinoHardwareInterface::write(
   message << std::fixed << std::setprecision(0);
   for (std::size_t index = 0; index < hw_commands_.size(); ++index) {
     if (!std::isfinite(hw_commands_[index])) {
-      RCLCPP_ERROR(LOGGER, "Joint '%s' received a non-finite command", info_.joints[index].name.c_str());
+      RCLCPP_ERROR(
+        LOGGER, "Joint '%s' received a non-finite command",
+        info_.joints[index].name.c_str());
       return hardware_interface::return_type::ERROR;
     }
     if (index > 0) {

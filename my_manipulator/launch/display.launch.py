@@ -7,7 +7,7 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
-    pkg_share = FindPackageShare('manipulator')
+    pkg_share = FindPackageShare('my_manipulator')
 
     xacro_file_path = PathJoinSubstitution(
         [pkg_share, 'urdf', 'manipulator.xacro']
@@ -30,20 +30,20 @@ def generate_launch_description():
             'use_sim_time',
             default_value='false',
             description='Use simulation (Gazebo) clock if true'),
-        
+
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
             name='robot_state_publisher',
             output='screen',
             parameters=[robot_description, {"use_sim_time": use_sim_time}]),
-        
+
         Node(
             package='joint_state_publisher_gui',
             executable='joint_state_publisher_gui',
             name='joint_state_publisher_gui',
             output='screen'),
-        
+
         Node(
             package='rviz2',
             executable='rviz2',

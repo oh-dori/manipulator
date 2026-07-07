@@ -22,14 +22,14 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
 
     # Get the package paths
-    pkg_manipulator_path = FindPackageShare('manipulator')
+    pkg_manipulator_path = FindPackageShare('my_manipulator')
     pkg_gazebo_ros_path = FindPackageShare('gazebo_ros')
 
     # XACRO 파일 경로 설정
     xacro_file = PathJoinSubstitution(
         [pkg_manipulator_path, "urdf", "manipulator_sim.urdf.xacro"]
     )
-    
+
     # xacro 명령어를 사용하여 URDF 생성
     robot_description_content = Command(
         [
@@ -72,11 +72,11 @@ def generate_launch_description():
         arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
     )
 
-    # Joint trajectory controller spawner
-    joint_trajectory_controller_spawner = Node(
+    # Arm controller spawner
+    arm_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["joint_trajectory_controller", "--controller-manager", "/controller_manager"],
+        arguments=["arm_controller", "--controller-manager", "/controller_manager"],
     )
 
     start_controllers = RegisterEventHandler(
@@ -84,7 +84,7 @@ def generate_launch_description():
             target_action=spawn_entity,
             on_exit=[
                 joint_state_broadcaster_spawner,
-                joint_trajectory_controller_spawner,
+                arm_controller_spawner,
             ],
         )
     )
