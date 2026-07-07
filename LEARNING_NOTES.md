@@ -1662,12 +1662,31 @@ RViz MotionPlanning 패널에서 다음을 확인한다.
 
 ```text
 Planning Group에서 arm을 선택할 수 있는가?
-link_5에 목표 자세 마커가 나타나는가?
-Plan을 누르면 충돌 없는 궤적 미리보기가 나타나는가?
+Planning Group에서 gripper를 선택할 수 있는가?
+joint-space 목표 또는 named state 목표로 Plan이 되는가?
 현재 자세와 목표 자세가 joint limit 안에 있는가?
 ```
 
-`Plan`은 계산과 미리보기만 하며 controller로 명령을 보내지 않는다. 이 구분을 먼저 확인해야 계획 문제와 실행 문제를 분리해서 디버깅할 수 있다.
+`Plan`은 계산과 미리보기만 하며 controller로 명령을 보내지 않는다. 로봇 일부가 반짝이거나 흐릿한 궤적이 보이는 것은 보통 RViz가 계획된 경로 또는 planning scene 상태를 표시하는 것이지, 실제 실행은 아니다. 실제 실행은 `Execute`를 눌렀을 때 `arm_controller` action으로 전달된다.
+
+`link_5`의 목표 자세 마커는 IK 설정이 있어야 의미 있게 동작한다. 현재 arm은 4축이라 6D pose 전체를 자유롭게 맞출 수 없으므로 `kinematics.yaml`에서는 우선 위치만 맞추는 `position_only_ik`를 사용한다.
+
+```yaml
+arm:
+  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+  kinematics_solver_search_resolution: 0.005
+  kinematics_solver_timeout: 0.05
+  position_only_ik: true
+```
+
+따라서 첫 검증 순서는 다음처럼 잡는다.
+
+```text
+1. arm 그룹 선택
+2. joint-space 목표 또는 home 같은 named state로 Plan
+3. 계획 궤적 미리보기 확인
+4. link_5 pose marker는 IK 경고가 사라진 뒤 작은 이동부터 확인
+```
 
 #### 4단계 — Gazebo 실행과 연결
 
@@ -1686,37 +1705,68 @@ MoveIt launch
   -> 기존 arm_controller의 action 사용
 ```
 
-MoveIt의 demo launch가 fake hardware나 별도의 controller manager를 함께 시작한다면 Gazebo와 중복될 수 있다. 따라서 Gazebo 연동 launch에서는 `move_group`과 MoveIt RViz만 실행하고, 로봇 상태와 controller는 기존 Gazebo 경로의 것을 사용한다.
+MoveIt의 `demo.launch.py`는 fake hardware와 별도의 `ros2_control_node`를 함께 시작한다. Gazebo와 같이 켜면 MoveIt이 Gazebo의 controller가 아니라 fake controller로 trajectory를 보낼 수 있다. 따라서 Gazebo 연동에서는 `demo.launch.py`를 쓰지 않고, `move_group`과 MoveIt RViz만 실행하며 로봇 상태와 controller는 기존 Gazebo 경로의 것을 사용한다.
 
-실행은 터미널을 나누어 확인한다.
-
-터미널 1:
+Gazebo와 MoveIt을 함께 확인할 때는 먼저 이 명령 하나만 사용한다.
 
 ```bash
-source ~/ros2_ws/install/setup.bash
-ros2 launch my_manipulator gazebo.launch.py
+cd ~/ros2_ws
+source install/setup.bash
+ros2 launch my_manipulator_moveit gazebo_moveit.launch.py
 ```
 
-터미널 2:
+이 명령은 내부에서 다음 세 launch를 순서대로 묶어 실행한다.
 
-```bash
-source ~/ros2_ws/install/setup.bash
-ros2 action info /arm_controller/follow_joint_trajectory
+```text
+my_manipulator/gazebo.launch.py
+  Gazebo 로봇과 GazeboSystem controller manager 실행
+
+my_manipulator_moveit/move_group.launch.py
+  MoveIt의 계획 노드 실행
+
+my_manipulator_moveit/moveit_rviz.launch.py
+  MotionPlanning 패널이 있는 RViz 실행
 ```
 
-터미널 3에서는 MoveIt 쪽 launch를 실행한다. 아직 `gazebo_moveit.launch.py`를 만들기 전이라면, Setup Assistant가 만든 `move_group.launch.py`와 `moveit_rviz.launch.py`를 조합하거나, 이후 별도 통합 launch를 만든다.
+이 통합 launch에서는 `move_group`과 RViz가 Gazebo의 `/clock`을 따르도록 `use_sim_time:=true`로 실행되고, MoveIt은 controller를 직접 시작하거나 전환하지 않는다. 이미 Gazebo 쪽에서 active 상태가 된 `arm_controller`에 trajectory action만 보낸다.
 
-```bash
-source ~/ros2_ws/install/setup.bash
-ros2 launch my_manipulator_moveit move_group.launch.py
+실행 후 RViz에서 다음 순서로 확인한다.
+
+```text
+1. MotionPlanning 패널에서 Planning Group을 arm으로 선택한다.
+2. Start State는 current로 둔다.
+3. Goal State는 작은 joint-space 목표나 home 같은 named state로 둔다.
+4. Plan을 눌러 궤적 미리보기가 나오는지 확인한다.
+5. Execute를 눌러 Gazebo 로봇이 움직이는지 확인한다.
 ```
 
-다른 터미널:
+여기서 중요한 구분은 다음과 같다.
 
-```bash
-source ~/ros2_ws/install/setup.bash
-ros2 launch my_manipulator_moveit moveit_rviz.launch.py
+```text
+Plan
+  MoveIt 내부에서 경로만 계산하고 RViz에 미리보기로 표시한다.
+  Gazebo 로봇은 아직 움직이지 않는다.
+
+Execute
+  계획된 JointTrajectory를 /arm_controller/follow_joint_trajectory action으로 보낸다.
+  이때 Gazebo의 arm_controller가 받아 로봇을 움직인다.
 ```
+
+정상 동작의 기준은 다음과 같다.
+
+```text
+Gazebo
+  로봇 모델이 보이고 Execute 후 조인트가 움직인다.
+
+RViz
+  planned path가 보이고 현재 로봇 상태가 /joint_states를 따라 갱신된다.
+
+터미널 로그
+  arm_controller가 active 상태로 올라오고
+  MoveItSimpleControllerManager가 arm_controller를 추가했다는 로그가 나온다.
+```
+
+움직이지 않을 때도 이 단계 안에서 여러 명령으로 흐름을 쪼개기보다는, 먼저 `demo.launch.py`를 같이 켜지 않았는지와 `Execute`까지 눌렀는지만 확인한다. 추가 진단 명령은 실제로 문제가 생겼을 때 별도로 확인한다.
 
 첫 통합 목표는 다음과 같다.
 
