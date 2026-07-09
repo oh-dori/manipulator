@@ -44,7 +44,7 @@ ament_target_dependencies(arduino_hardware_interface
 pluginlib_export_plugin_description_file(hardware_interface arduino_hardware_interface.xml)
 
 install(
-  DIRECTORY config launch meshes rviz urdf
+  DIRECTORY config launch meshes rviz urdf worlds
   DESTINATION share/${PROJECT_NAME}
 )
 

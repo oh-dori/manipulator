@@ -165,7 +165,7 @@ hardware_interface::CallbackReturn ArduinoHardwareInterface::on_init(
       return hardware_interface::CallbackReturn::ERROR;
     }
 
-    if (command_min >= command_max) {
+    if (command_min == command_max) {
       RCLCPP_ERROR(LOGGER, "Joint '%s' has an invalid command range", joint.name.c_str());
       return hardware_interface::CallbackReturn::ERROR;
     }
@@ -179,7 +179,9 @@ hardware_interface::CallbackReturn ArduinoHardwareInterface::on_init(
       return hardware_interface::CallbackReturn::ERROR;
     }
 
-    initial_position = std::clamp(initial_position, command_min, command_max);
+    const double command_lower = std::min(command_min, command_max);
+    const double command_upper = std::max(command_min, command_max);
+    initial_position = std::clamp(initial_position, command_lower, command_upper);
     hw_commands_[index] = initial_position;
     hw_positions_[index] = initial_position;
     joint_mappings_.push_back({command_min, command_max, servo_min, servo_max});
@@ -309,8 +311,10 @@ double ArduinoHardwareInterface::command_to_servo_angle(
   std::size_t joint_index, double command) const
 {
   const auto & mapping = joint_mappings_[joint_index];
+  const double command_lower = std::min(mapping.command_min, mapping.command_max);
+  const double command_upper = std::max(mapping.command_min, mapping.command_max);
   const double clamped_command = std::clamp(
-    command, mapping.command_min, mapping.command_max);
+    command, command_lower, command_upper);
   const double ratio =
     (clamped_command - mapping.command_min) /
     (mapping.command_max - mapping.command_min);

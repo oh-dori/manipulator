@@ -29,6 +29,9 @@ def generate_launch_description():
     xacro_file = PathJoinSubstitution(
         [pkg_manipulator_path, "urdf", "manipulator_sim.urdf.xacro"]
     )
+    world_file = PathJoinSubstitution(
+        [pkg_manipulator_path, "worlds", "realtime.world"]
+    )
 
     # xacro 명령어를 사용하여 URDF 생성
     robot_description_content = Command(
@@ -46,7 +49,10 @@ def generate_launch_description():
             PathJoinSubstitution(
                 [pkg_gazebo_ros_path, 'launch', 'gazebo.launch.py']
             )
-        )
+        ),
+        launch_arguments={
+            "world": world_file,
+        }.items(),
     )
 
     # Spawn robot

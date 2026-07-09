@@ -97,6 +97,12 @@ ros2 launch my_manipulator display.launch.py
 
 RViz Fixed Frame은 `world`다.
 
+실행 중인 Gazebo나 실제 로봇 상태를 보기만 할 때는 트랙바가 있는 `display.launch.py` 대신 RViz만 따로 실행한다.
+
+```bash
+rviz2 -d ~/ros2_ws/src/manipulator/my_manipulator/rviz/display.rviz
+```
+
 ## Gazebo 시뮬레이션
 
 터미널 1:
@@ -104,6 +110,13 @@ RViz Fixed Frame은 `world`다.
 ```bash
 source ~/ros2_ws/install/setup.bash
 ros2 launch my_manipulator gazebo.launch.py
+```
+
+필요하면 다른 터미널에서 RViz만 따로 실행해 `/joint_states`와 `/tf` 흐름을 확인한다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+rviz2 -d ~/ros2_ws/src/manipulator/my_manipulator/rviz/display.rviz
 ```
 
 로봇 spawn이 완료된 후 터미널 2에서 컨트롤러 상태를 확인한다.
@@ -133,6 +146,13 @@ Arduino를 연결하지 않고 하드웨어 인터페이스와 controller 동작
 ```bash
 source ~/ros2_ws/install/setup.bash
 ros2 launch my_manipulator real_robot.launch.py dry_run:=true
+```
+
+상태를 화면으로 확인하고 싶으면 다른 터미널에서 RViz만 따로 실행한다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+rviz2 -d ~/ros2_ws/src/manipulator/my_manipulator/rviz/display.rviz
 ```
 
 이 모드에서는 시리얼 포트를 열지 않는다. 조인트 명령을 보내면 Arduino로
@@ -171,7 +191,7 @@ ros2 launch my_manipulator real_robot.launch.py \
 ros2 launch my_manipulator real_robot.launch.py
 ```
 
-실행 후 터미널 2에서 [조인트 이동 명령](#조인트-이동-명령)을 전송한다.
+상태를 화면으로 확인하고 싶으면 RViz만 따로 실행한다. 실행 후 터미널 2에서 [조인트 이동 명령](#조인트-이동-명령)을 전송한다.
 
 ## 조인트 이동 명령
 
@@ -244,7 +264,7 @@ joint_1,joint_2,joint_3,joint_4,joint_5_left,move_immediately
 <param name="servo_max_angle">180</param>
 ```
 
-URDF 최소 위치는 `servo_min_angle`, 최대 위치는 `servo_max_angle`에 선형 매핑된다. 서보 방향을 반대로 쓰려면 두 각도를 뒤집는다.
+`command_interface`의 `min`은 `servo_min_angle`, `max`는 `servo_max_angle`에 선형 매핑된다. 서보 각도 범위는 실제 안전 각도 그대로 두고, ROS 조인트 방향과 서보 장착 방향이 반대인 조인트는 `command_interface`의 `min`/`max`를 서로 바꿔 보정한다.
 
 실제 기구물에 연결하기 전에는 서보 혼만 분리하거나 부하가 없는 상태에서 각 조인트의 최소·최대 각도를 반드시 보정해야 한다.
 

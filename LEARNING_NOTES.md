@@ -336,14 +336,18 @@ ros2 launch my_manipulator real_robot.launch.py dry_run:=true
 
 `servo_min_angle`, `servo_max_angle`은 Arduino 서보에 보낼 실제 각도 범위다. 이 값은 표준 URDF 값이 아니라 `ArduinoHardwareInterface`가 읽는 커스텀 파라미터다.
 
-서보 장착 방향이 ROS joint 방향과 반대라면 아래처럼 두 값을 서로 바꿔서 보정할 수 있다.
+서보 장착 방향이 ROS joint 방향과 반대라면 서보 각도 범위는 실제 안전 각도 그대로 두고, `command_interface`의 `min`/`max`를 서로 바꿔서 보정한다.
 
 ```xml
-<param name="servo_min_angle">180</param>
-<param name="servo_max_angle">0</param>
+<param name="servo_min_angle">0</param>
+<param name="servo_max_angle">180</param>
+<command_interface name="position">
+  <param name="min">${pi/2}</param>
+  <param name="max">${-pi/2}</param>
+</command_interface>
 ```
 
-이 경우 ROS 쪽 조인트 명령이 커질수록 Arduino로 보내는 서보 각도는 작아진다.
+이 경우 ROS 쪽 조인트 명령이 작아질수록 Arduino로 보내는 서보 각도는 커진다.
 
 현재 `joint_3`에는 이 반전 설정을 사용하지 않는다. ROS 명령 범위 `-pi ~ 0`을 서보 각도 `0 ~ 180`에 대응시킨다.
 
@@ -495,9 +499,6 @@ ros2_control_node 노드
   robot_description 안의 <ros2_control> 블록을 읽는다.
   my_controllers.yaml도 함께 읽는다.
   ArduinoHardwareInterface와 controller들을 연결한다.
-
-rviz2 노드
-  /tf와 robot_description을 받아 실제 제어 흐름에서 로봇 모델이 어떻게 움직이는지 보여준다.
 ```
 
 최종 흐름은 다음과 같다.
@@ -516,7 +517,12 @@ ArduinoHardwareInterface::read()
   -> /joint_states
   -> robot_state_publisher
   -> /tf, /tf_static
-  -> RViz
+```
+
+이 흐름을 화면으로 보고 싶을 때만 RViz를 별도 명령으로 붙인다. `display.launch.py`처럼 트랙바가 있는 확인용 launch를 같이 쓰지 않는다.
+
+```bash
+rviz2 -d ~/ros2_ws/src/manipulator/my_manipulator/rviz/display.rviz
 ```
 
 ---
@@ -665,7 +671,7 @@ servo = servo_min_angle + ratio × (servo_max_angle - servo_min_angle)
 
 이 방식은 회전 조인트뿐 아니라 미터 단위인 prismatic 그리퍼에도 동일하게 적용된다.
 
-서보 방향이 반대인 경우에는 `servo_min_angle`과 `servo_max_angle`을 서로 바꿔서 보정한다.
+서보 방향이 반대인 경우에는 서보 각도 범위 대신 `command_min`과 `command_max`를 서로 바꿔서 보정한다. 이 프로젝트의 `ArduinoHardwareInterface`는 내림차순 command range도 허용하고, clamp할 때는 두 값 중 작은 값과 큰 값을 안전 범위로 사용한다.
 
 ### 100 Hz 제어와 20 Hz 시리얼
 
@@ -971,6 +977,13 @@ joint limit
 ```bash
 source ~/ros2_ws/install/setup.bash
 ros2 launch my_manipulator gazebo.launch.py
+```
+
+Gazebo와 함께 ROS TF 모델을 RViz에서도 보고 싶으면 다른 터미널에서 RViz만 따로 실행한다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+rviz2 -d ~/ros2_ws/src/manipulator/my_manipulator/rviz/display.rviz
 ```
 
 로봇 spawn이 끝난 후 터미널 2에서 controller를 확인한다.
@@ -1509,30 +1522,6 @@ xacro src/manipulator/my_manipulator/urdf/manipulator.xacro > /tmp/my_manipulato
 check_urdf /tmp/my_manipulator.urdf
 ```
 
-Gazebo 쪽 controller가 `arm_controller` 이름으로 올라오는지도 먼저 확인한다.
-
-터미널 1:
-
-```bash
-source ~/ros2_ws/install/setup.bash
-ros2 launch my_manipulator gazebo.launch.py
-```
-
-터미널 2:
-
-```bash
-source ~/ros2_ws/install/setup.bash
-ros2 control list_controllers
-ros2 action info /arm_controller/follow_joint_trajectory
-```
-
-예상되는 controller 이름은 다음과 같다.
-
-```text
-joint_state_broadcaster       active
-arm_controller                active
-```
-
 #### 2단계 — MoveIt 설정 패키지 생성
 
 Setup Assistant를 실행한다.
@@ -1651,13 +1640,6 @@ Setup Assistant가 생성한 launch 파일 이름은 버전에 따라 조금 다
 ros2 launch my_manipulator_moveit demo.launch.py
 ```
 
-만약 생성된 파일명이 다르면 아래 명령으로 launch 파일을 확인한다.
-
-```bash
-ros2 pkg prefix my_manipulator_moveit
-ls ~/ros2_ws/src/manipulator/my_manipulator_moveit/launch
-```
-
 RViz MotionPlanning 패널에서 다음을 확인한다.
 
 ```text
@@ -1740,6 +1722,8 @@ my_manipulator_moveit/moveit_rviz.launch.py
 5. Execute를 눌러 Gazebo 로봇이 움직이는지 확인한다.
 ```
 
+Gazebo 로봇이 너무 천천히 움직이면 `Plan`을 누르기 전에 MotionPlanning 패널의 `Velocity Scaling` 값을 올린다. 예를 들어 `0.1`이면 최대 조인트 속도의 10%만 사용하므로 계획된 trajectory 시간이 길어진다. `0.5`로 바꾸고 다시 `Plan`하면 waypoint들의 `time_from_start`가 더 짧게 잡히고, `Execute` 때 Gazebo 로봇도 더 빠르게 움직인다.
+
 여기서 중요한 구분은 다음과 같다.
 
 ```text
@@ -1793,14 +1777,94 @@ MoveIt Planning Scene
 
 따라서 장애물 회피 실습에서는 같은 물체를 MoveIt Planning Scene에 collision object로 추가해야 한다. RViz에서는 Gazebo 화면이 아니라 MoveIt이 실제로 알고 있는 충돌 환경을 확인한다.
 
-#### 6단계 — 코드로 목표 전달
+첫 실습은 RViz에서 Planning Scene에 박스 하나를 직접 추가하는 방식으로 진행한다.
 
-RViz 검증이 끝나면 Python 또는 C++ 노드에서 다음 목표를 전달한다.
+```text
+1. 4단계와 같은 gazebo_moveit.launch.py를 실행한다.
+2. RViz MotionPlanning 패널에서 Scene Objects 탭을 연다.
+3. Box 형태의 collision object를 하나 추가한다.
+4. 로봇 팔이 지나갈 법한 위치에 박스를 둔다.
+5. Publish Scene 또는 Apply 버튼으로 Planning Scene에 반영한다.
+6. MotionPlanning 탭으로 돌아가 같은 목표에 대해 다시 Plan한다.
+```
 
-- 미리 정한 named pose
-- 조인트 목표값
-- `link_5`의 위치와 방향
-- 여러 waypoint를 잇는 Cartesian path
+이때 RViz에 보이는 박스는 MoveIt의 충돌 검사에 쓰이는 물체다. Gazebo 물리 world에 자동으로 생긴 물체가 아니므로 Gazebo 화면에는 보이지 않을 수 있다. 반대로 Gazebo 화면에 물체가 있어도 MoveIt Planning Scene에 추가하지 않으면 MoveIt은 그 물체를 피하지 않는다.
+
+성공 기준은 다음과 같다.
+
+```text
+장애물 없는 상태
+  목표까지 직선에 가까운 경로가 계획될 수 있다.
+
+장애물 추가 후
+  같은 목표를 다시 Plan했을 때 경로가 장애물을 피해 돌아가거나,
+  피할 수 없는 경우 planning 실패가 난다.
+```
+
+#### 6단계 — Named State 관리와 코드 목표 전달
+
+RViz 검증이 끝나면 매번 목표를 손으로 끌어 움직이기보다, 자주 쓰는 자세를 이름으로 저장해 두는 것이 좋다. 이처럼 이름이 붙은 조인트 자세를 MoveIt에서는 named state 또는 group state로 다룬다.
+
+현재 설정에는 `home`이라는 arm group 상태가 하나 들어 있다. 이 정보는 `my_manipulator_moveit/config/manipulator.srdf`에 저장된다.
+
+```xml
+<group_state name="home" group="arm">
+    <joint name="joint_1" value="0"/>
+    <joint name="joint_2" value="0"/>
+    <joint name="joint_3" value="0"/>
+    <joint name="joint_4" value="0"/>
+</group_state>
+```
+
+새 named state를 만드는 방법은 두 가지다.
+
+Setup Assistant를 다시 열 때는 다음 명령을 사용한다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch moveit_setup_assistant setup_assistant.launch.py
+```
+
+```text
+MoveIt Setup Assistant
+  Robot Poses 단계에서 arm group을 선택한다.
+  joint 값을 원하는 자세로 맞춘다.
+  ready, pick_prepose 같은 이름으로 저장한다.
+  Generate Package를 다시 실행하면 SRDF에 group_state로 기록된다.
+
+SRDF 직접 수정
+  manipulator.srdf에 <group_state> 블록을 추가한다.
+  group 이름과 joint 이름은 기존 planning group과 정확히 맞춘다.
+  파일 수정 후 colcon build와 source를 다시 수행한다.
+```
+
+예를 들어 `ready` 자세를 추가한다면 구조는 다음과 같다.
+
+```xml
+<group_state name="ready" group="arm">
+    <joint name="joint_1" value="0.0"/>
+    <joint name="joint_2" value="0.4"/>
+    <joint name="joint_3" value="-0.8"/>
+    <joint name="joint_4" value="0.2"/>
+</group_state>
+```
+
+이 방식의 장점은 목표를 줄 때마다 엔드이펙터 pose나 각 조인트 값을 다시 계산하지 않아도 된다는 점이다. 코드에서는 이름만 선택하면 된다.
+
+```text
+코드
+  -> arm group 선택
+  -> named target "home" 선택
+  -> Plan
+  -> Execute
+  -> 기존 /arm_controller/follow_joint_trajectory action으로 전달
+```
+
+RViz MotionPlanning 패널에서 고른 named state와 코드에서 쓰는 named target은 같은 SRDF 정보를 기준으로 한다. 따라서 자주 쓰는 자세는 `home`, `ready`, `pick_prepose`처럼 SRDF의 `group_state`로 저장해 두는 것이 좋다.
+
+주의할 점은 RViz에서 임시로 움직인 목표 자세가 자동으로 SRDF named state가 되는 것은 아니라는 점이다. RViz의 Stored States나 warehouse 기능은 RViz/DB 쪽 저장 기능에 가깝고, 이 프로젝트 설정 파일에 항상 남는 named state와는 구분해서 보는 것이 좋다.
+
+터미널에서 바로 `home`이라는 이름만 넣어 MoveIt 계획과 실행을 시키는 기본 명령은 없다. 터미널에서 `ros2 action send_goal /arm_controller/follow_joint_trajectory ...`를 직접 쓰면 controller로 조인트 trajectory를 보낼 수는 있지만, 이 경우 MoveIt의 충돌 검사와 planning을 거치지 않는다. MoveIt을 거치려면 작은 Python/C++ 노드를 만들어 `setNamedTarget("home")`처럼 named state를 목표로 넣고 plan/execute를 호출하는 흐름을 사용한다.
 
 이때부터 RViz는 필수 실행 요소가 아니라 필요할 때 켜는 디버깅 도구가 된다.
 
@@ -1815,6 +1879,34 @@ GazeboSystem 대신 ArduinoHardwareInterface 사용
 ```
 
 실제 로봇에서는 현재 엔코더 피드백이 없어 명령 위치를 현재 위치로 간주한다. 따라서 MoveIt 화면에서 정상으로 보여도 로봇이 물리적으로 막혔는지는 알 수 없다. 처음에는 낮은 속도와 좁은 작업 범위에서 시험하고, 비상 정지와 전원 차단 수단을 준비해야 한다.
+
+MoveIt RViz에서 실제 로봇을 움직일 때는 `my_manipulator_moveit`의 실제 로봇용 통합 launch를 사용한다. 구조는 Gazebo 통합 launch와 같지만, 포함하는 실행 대상만 바뀐다.
+
+```text
+gazebo_moveit.launch.py
+  -> my_manipulator/gazebo.launch.py
+  -> GazeboSystem
+
+real_moveit.launch.py
+  -> my_manipulator/real_robot.launch.py
+  -> ArduinoHardwareInterface
+```
+
+먼저 실제 시리얼 포트를 열지 않는 dry-run으로 MoveIt과 controller 연결을 확인한다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch my_manipulator_moveit real_moveit.launch.py dry_run:=true
+```
+
+이 상태에서 RViz MotionPlanning 패널로 `Plan`과 `Execute`를 누르면, 하드웨어 인터페이스가 Arduino로 실제 전송하지 않고 CSV 명령을 로그로 출력한다. 계획과 실행 흐름이 맞는지 확인한 뒤 실제 로봇을 연결한다.
+
+```bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch my_manipulator_moveit real_moveit.launch.py serial_port:=/dev/ttyACM0
+```
+
+포트 이름은 환경에 따라 `/dev/ttyUSB0`, `/dev/ttyACM0`처럼 달라질 수 있다. 처음 실제 실행할 때는 RViz MotionPlanning 패널에서 `Velocity Scaling`을 낮게 두고, `home`처럼 이미 검증한 named state나 아주 가까운 목표만 사용한다.
 
 ### 단계별 성공 기준
 
@@ -1882,11 +1974,13 @@ ros2 launch my_manipulator display.launch.py
 
 ```bash
 ros2 launch my_manipulator gazebo.launch.py
+rviz2 -d ~/ros2_ws/src/manipulator/my_manipulator/rviz/display.rviz
 ros2 control list_controllers
 ros2 topic echo /joint_states
 ```
 
 - 두 컨트롤러가 active인지
+- RViz를 별도 실행했을 때 `/joint_states` → `/tf` 흐름으로 모델이 움직이는지
 - trajectory 명령 후 5개 명령축이 목표값으로 이동하는지
 - `joint_5_right`가 `joint_5_left`를 따라가는지
 
@@ -1894,11 +1988,12 @@ ros2 topic echo /joint_states
 
 ```bash
 ros2 launch my_manipulator real_robot.launch.py serial_port:=/dev/ttyACM0
+rviz2 -d ~/ros2_ws/src/manipulator/my_manipulator/rviz/display.rviz
 ```
 
 - Arduino 없이 테스트할 때는 `dry_run:=true`로 실행했는지
 - dry-run에서 시리얼 포트를 열지 않고 Arduino로 보낼 CSV만 출력하는지
-- RViz가 함께 뜨고 `/joint_states` → `/tf` 흐름으로 모델이 움직이는지
+- RViz를 별도 실행했을 때 `/joint_states` → `/tf` 흐름으로 모델이 움직이는지
 - 실제 Arduino에 보낼 때는 기본값인 `dry_run:=false`로 실행하는지
 - 실행 사용자가 시리얼 장치 권한을 갖는지
 - Arduino 보드레이트가 launch 값과 같은지

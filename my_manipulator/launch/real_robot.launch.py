@@ -77,10 +77,6 @@ def generate_launch_description():
     )
     robot_description = {"robot_description": robot_description_content}
 
-    rviz_config_file = PathJoinSubstitution(
-        [pkg_manipulator_path, "rviz", "display.rviz"]
-    )
-
     # ros2_control 노드: 하드웨어 인터페이스와 컨트롤러 매니저를 로드합니다.
     ros2_control_node = Node(
         package="controller_manager",
@@ -114,18 +110,9 @@ def generate_launch_description():
         arguments=["arm_controller", "--controller-manager", "/controller_manager"],
     )
 
-    rviz_node = Node(
-        package="rviz2",
-        executable="rviz2",
-        name="rviz2",
-        output="screen",
-        arguments=["-d", rviz_config_file],
-    )
-
     return LaunchDescription(declared_arguments + [
         ros2_control_node,
         robot_state_publisher_node,
         joint_state_broadcaster_spawner,
         arm_controller_spawner,
-        rviz_node,
     ])

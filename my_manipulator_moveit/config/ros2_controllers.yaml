@@ -19,7 +19,6 @@ arm_controller:
       - joint_4
       - joint_5_left
     command_interfaces:
-      - position
+      []
     state_interfaces:
-      - position
-    allow_partial_joints_goal: true
+      []
